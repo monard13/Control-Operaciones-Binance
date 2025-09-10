@@ -1,5 +1,5 @@
 
-import express, { Request, Response } from 'express';
+import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import { GoogleGenAI, Type } from "@google/genai";
@@ -35,13 +35,15 @@ app.use(cors());
 app.use('/', express.json({ limit: '10mb' }));
 
 // API routes
-app.get('/api/orders', (req: Request, res: Response) => {
+// FIX: Use express.Request and express.Response to avoid type conflicts with global types.
+app.get('/api/orders', (req: express.Request, res: express.Response) => {
     // In a real app, you'd fetch this from a database.
     // For now, returning an empty array to match initial frontend state.
     res.json([]);
 });
 
-app.post('/api/extract-data', async (req: Request, res: Response) => {
+// FIX: Use express.Request and express.Response to avoid type conflicts with global types.
+app.post('/api/extract-data', async (req: express.Request, res: express.Response) => {
     const { base64Image, mimeType, prompt } = req.body;
 
     if (!base64Image || !mimeType || !prompt) {
@@ -83,13 +85,23 @@ app.post('/api/extract-data', async (req: Request, res: Response) => {
             },
         });
 
-        const jsonText = response.text.trim();
+        const text = response.text;
+        if (!text) {
+            console.error("Gemini API returned no text content.");
+            return res.status(500).json({ error: "Failed to get a valid response from AI service." });
+        }
+
+        const jsonText = text.trim();
         const extractedData = JSON.parse(jsonText) as ExtractedInfo[];
         res.json(extractedData);
 
     } catch (error) {
-        console.error("Error calling Gemini API:", error);
-        res.status(500).json({ error: 'Failed to extract data from image.' });
+        console.error("Error calling Gemini API or parsing response:", error);
+        if (error instanceof SyntaxError) {
+             res.status(500).json({ error: 'Failed to parse JSON from AI response.' });
+        } else {
+             res.status(500).json({ error: 'Failed to extract data from image.' });
+        }
     }
 });
 
@@ -104,7 +116,8 @@ if (process.env.NODE_ENV === 'production') {
     // The "catchall" handler: for any request that doesn't
     // match one above, send back React's index.html file.
     // FIX: Added explicit types for req and res to solve overload resolution error.
-    app.get('*', (req: Request, res: Response) => {
+    // FIX: Use express.Request and express.Response to avoid type conflicts with global types.
+    app.get('*', (req: express.Request, res: express.Response) => {
         res.sendFile(path.join(__dirname, 'dist/index.html'));
     });
 }
