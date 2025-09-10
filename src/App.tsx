@@ -101,13 +101,6 @@ const parseCurrencyValue = (valueStr: string | undefined): { amount: number, cur
     return { amount: isNaN(amount) ? 0 : amount, currency };
 };
 
-const parseNumericValue = (text: string | undefined): string => {
-    if (!text) return '-';
-    const match = text.match(/[\d.,]+/);
-    return match ? match[0] : '-';
-};
-
-
 // Components
 const LinkItem: React.FC<{
   item: GeneratedItem;
@@ -234,12 +227,15 @@ const ExecutionProcessor: React.FC<{
             }
         }
         
-        const filledQuantity = `${formatNumber(totalsData.quantity)} / ${formatNumber(totalsData.quantity)}`;
-        const fee = Array.from(totalsData.fees.entries()).map(([curr, val]) => `${formatNumber(val)} ${curr}`).join(', ');
-        const total = Array.from(totalsData.totals.entries()).map(([curr, val]) => `${formatNumber(val)} ${curr}`).join(', ');
+        const highPrecisionOptions = { maximumFractionDigits: 8 };
+        const currencyOptions = { minimumFractionDigits: 2, maximumFractionDigits: 2 };
+
+        const filledQuantity = `${formatNumber(totalsData.quantity, highPrecisionOptions)} / ${formatNumber(totalsData.quantity, highPrecisionOptions)}`;
+        const fee = Array.from(totalsData.fees.entries()).map(([curr, val]) => `${formatNumber(val, highPrecisionOptions)} ${curr}`).join(', ');
+        const total = Array.from(totalsData.totals.entries()).map(([curr, val]) => `${formatNumber(val, currencyOptions)} ${curr}`).join(', ');
         
         const mainTotal = totalsData.totals.get('BRL') || 0;
-        const averagePrice = totalsData.quantity > 0 ? formatNumber(mainTotal / totalsData.quantity) : '0,00';
+        const averagePrice = totalsData.quantity > 0 ? formatNumber(mainTotal / totalsData.quantity, highPrecisionOptions) : formatNumber(0, currencyOptions);
 
         return {
             filledQuantity,
@@ -569,7 +565,8 @@ const HistoryView: React.FC<{
     orders: Order[];
     language: Language;
     formatCurrency: (value: number) => string;
-}> = ({ orders, language, formatCurrency }) => {
+    formatNumber: (value: number, options?: Intl.NumberFormatOptions) => string;
+}> = ({ orders, language, formatCurrency, formatNumber }) => {
     const { t } = useLanguage();
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
@@ -616,9 +613,9 @@ const HistoryView: React.FC<{
                 `"${new Date(order.createdAt).toLocaleString(locale)}"`,
                 `"${order.totalAmount.toFixed(2)}"`,
                 `"${parseCurrencyValue(totals.total).amount.toFixed(2)}"`,
-                `"${parseCurrencyValue(totals.filledQuantity).amount.toFixed(2)}"`,
-                `"${parseCurrencyValue(totals.fee).amount.toFixed(2)}"`,
-                `"${parseCurrencyValue(totals.averagePrice).amount.toFixed(2)}"`,
+                `"${parseCurrencyValue(totals.filledQuantity).amount.toFixed(4)}"`,
+                `"${parseCurrencyValue(totals.fee).amount.toFixed(4)}"`,
+                `"${parseCurrencyValue(totals.averagePrice).amount.toFixed(4)}"`,
             ].join(',');
         });
 
@@ -707,15 +704,20 @@ const HistoryView: React.FC<{
                                 const locale = language === 'pt' ? 'pt-BR' : language === 'en' ? 'en-US' : 'es-CL';
                                 const formattedAmount = formatCurrency(order.totalAmount);
                                 
+                                const { amount: brlAmount } = parseCurrencyValue(totals.total);
+                                const { amount: usdtAmount } = parseCurrencyValue(totals.filledQuantity);
+                                const { amount: feeAmount } = parseCurrencyValue(totals.fee);
+                                const { amount: avgPriceAmount } = parseCurrencyValue(totals.averagePrice);
+
                                 return (
                                     <tr key={order.id} className="hover:bg-slate-700/50 transition-colors text-sm">
                                         <td className="px-6 py-4 font-mono text-cyan-400 whitespace-nowrap">{order.id}</td>
                                         <td className="px-6 py-4 text-slate-300 whitespace-nowrap">{new Date(order.createdAt).toLocaleDateString(locale)}</td>
                                         <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap text-right">{formattedAmount}</td>
-                                        <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap text-right">{parseNumericValue(totals.total)}</td>
-                                        <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap text-right">{parseNumericValue(totals.filledQuantity)}</td>
-                                        <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap text-right">{parseNumericValue(totals.fee)}</td>
-                                        <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap text-right">{parseNumericValue(totals.averagePrice)}</td>
+                                        <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap text-right">{formatNumber(brlAmount)}</td>
+                                        <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap text-right">{formatNumber(usdtAmount, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
+                                        <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap text-right">{formatNumber(feeAmount, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
+                                        <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap text-right">{formatNumber(avgPriceAmount, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
                                         <td className="px-6 py-4 text-center">
                                             <span className={`px-2 py-1 text-xs font-bold rounded-full capitalize ${order.status === 'pagado' ? 'bg-green-500/20 text-green-300' : 'bg-yellow-500/20 text-yellow-300'}`}>
                                                 {t(order.status === 'pagado' ? 'statusPaid' : 'statusPending')}
@@ -1253,7 +1255,7 @@ const App: React.FC = () => {
     const formatTaxa = useCallback((taxaMap: Map<string, number>): string => {
         if (taxaMap.size === 0) return formatNumber(0);
         return Array.from(taxaMap.entries())
-            .map(([currency, value]) => `${formatNumber(value, { maximumFractionDigits: 4 })} ${currency}`)
+            .map(([currency, value]) => `${formatNumber(value, { minimumFractionDigits: 4, maximumFractionDigits: 4 })} ${currency}`)
             .join(', ');
     }, [language, formatNumber]);
 
@@ -1261,7 +1263,7 @@ const App: React.FC = () => {
     const renderContent = () => {
         switch (viewState.view) {
             case 'history':
-                return <HistoryView orders={orders} language={language} formatCurrency={formatCurrency} />;
+                return <HistoryView orders={orders} language={language} formatCurrency={formatCurrency} formatNumber={formatNumber} />;
             case 'processing':
                 return currentOrder && (
                     <ExecutionProcessor 
@@ -1476,13 +1478,12 @@ const App: React.FC = () => {
                                                 {orders.map(order => {
                                                     const totals = order.executionTotals;
                                                     const isRegistered = order.isExecutionRegistered;
-
-                                                    const totalBRL = isRegistered ? parseNumericValue(totals?.total) : '-';
-                                                    const totalUSDT = isRegistered ? parseNumericValue(totals?.filledQuantity) : '-';
-                                                    const totalTaxa = isRegistered ? parseNumericValue(totals?.fee) : '-';
                                                     
-                                                    const formattedAmount = formatCurrency(order.totalAmount);
+                                                    const { amount: brlAmount } = isRegistered ? parseCurrencyValue(totals?.total) : { amount: 0 };
+                                                    const { amount: usdtAmount } = isRegistered ? parseCurrencyValue(totals?.filledQuantity) : { amount: 0 };
+                                                    const { amount: feeAmount } = isRegistered ? parseCurrencyValue(totals?.fee) : { amount: 0 };
 
+                                                    const formattedAmount = formatCurrency(order.totalAmount);
 
                                                     return (
                                                         <tr key={order.id} className={`transition-colors ${selectedOrders.has(order.id) ? 'bg-slate-700' : 'hover:bg-slate-800'}`}>
@@ -1498,9 +1499,9 @@ const App: React.FC = () => {
                                                             <td onClick={() => setViewState({ view: 'detail', orderId: order.id })} className="px-6 py-4 font-mono text-cyan-400 whitespace-nowrap cursor-pointer">{order.id}</td>
                                                             <td onClick={() => setViewState({ view: 'detail', orderId: order.id })} className="px-6 py-4 text-slate-300 whitespace-nowrap cursor-pointer">{new Date(order.createdAt).toLocaleString(language)}</td>
                                                             <td onClick={() => setViewState({ view: 'detail', orderId: order.id })} className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap cursor-pointer">{formattedAmount}</td>
-                                                            <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap">{totalBRL}</td>
-                                                            <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap">{totalUSDT}</td>
-                                                            <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap">{totalTaxa}</td>
+                                                            <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap">{isRegistered ? formatNumber(brlAmount) : '-'}</td>
+                                                            <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap">{isRegistered ? formatNumber(usdtAmount, { minimumFractionDigits: 4, maximumFractionDigits: 4 }) : '-'}</td>
+                                                            <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap">{isRegistered ? formatNumber(feeAmount, { minimumFractionDigits: 4, maximumFractionDigits: 4 }) : '-'}</td>
                                                             <td onClick={() => setViewState({ view: 'detail', orderId: order.id })} className="px-6 py-4 cursor-pointer">
                                                                 <span className={`px-2 py-1 text-xs font-bold rounded-full capitalize ${order.status === 'pagado' ? 'bg-green-500/20 text-green-300' : 'bg-yellow-500/20 text-yellow-300'}`}>
                                                                     {t(order.status === 'pagado' ? 'statusPaid' : 'statusPending')}
