@@ -1,7 +1,9 @@
 
-import express from 'express';
+// FIX: Import Request and Response types from express to fix typing issues with request handlers and middleware.
+import express, { Request, Response } from 'express';
 import cors from 'cors';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { GoogleGenAI, Type } from "@google/genai";
 
 // Ensure API_KEY is set
@@ -31,19 +33,18 @@ interface ExtractedInfo {
 // Middleware
 app.use(cors());
 // Increase payload size limit for base64 images
-// FIX: Added explicit path '/' to help TypeScript resolve the correct app.use overload.
-app.use('/', express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '10mb' }));
 
 // API routes
-// FIX: Use express.Request and express.Response to avoid type conflicts with global types.
-app.get('/api/orders', (req: express.Request, res: express.Response) => {
+// FIX: Use correct types for request and response objects.
+app.get('/api/orders', (req: Request, res: Response) => {
     // In a real app, you'd fetch this from a database.
     // For now, returning an empty array to match initial frontend state.
     res.json([]);
 });
 
-// FIX: Use express.Request and express.Response to avoid type conflicts with global types.
-app.post('/api/extract-data', async (req: express.Request, res: express.Response) => {
+// FIX: Use correct types for request and response objects.
+app.post('/api/extract-data', async (req: Request, res: Response) => {
     const { base64Image, mimeType, prompt } = req.body;
 
     if (!base64Image || !mimeType || !prompt) {
@@ -109,16 +110,20 @@ app.post('/api/extract-data', async (req: express.Request, res: express.Response
 // Serve frontend
 // This part is crucial for Render deployment
 if (process.env.NODE_ENV === 'production') {
-    const __dirname = path.resolve(path.dirname(''));
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    
+    // The compiled server code is in server/dist, so we go up two levels to the project root, then into the frontend 'dist' folder.
+    const frontendDistPath = path.join(__dirname, '..', '..', 'dist');
+
     // Serve static files from the React app build directory
-    app.use(express.static(path.join(__dirname, 'dist')));
+    app.use(express.static(frontendDistPath));
 
     // The "catchall" handler: for any request that doesn't
     // match one above, send back React's index.html file.
-    // FIX: Added explicit types for req and res to solve overload resolution error.
-    // FIX: Use express.Request and express.Response to avoid type conflicts with global types.
-    app.get('*', (req: express.Request, res: express.Response) => {
-        res.sendFile(path.join(__dirname, 'dist/index.html'));
+    // FIX: Use correct types for request and response objects.
+    app.get('*', (req: Request, res: Response) => {
+        res.sendFile(path.join(frontendDistPath, 'index.html'));
     });
 }
 
