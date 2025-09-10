@@ -49,7 +49,9 @@ export const translations = {
     feeExec: 'Fee (Exec.)',
     process: 'Process',
     processed: 'Processed',
-    deleteOrder: 'Delete Order',
+    deleteSelected: 'Delete Selected',
+    selectedOrdersCount: '{0} selected',
+    confirmDeleteSelectedOrders: 'Are you sure you want to permanently delete the {0} selected orders? This action cannot be undone.',
     confirmDeleteOrder: 'Are you sure you want to permanently delete order {0}? This action cannot be undone.',
 
     // Detail View
@@ -158,7 +160,9 @@ export const translations = {
     feeExec: 'Taxa (Ejec.)',
     process: 'Procesar',
     processed: 'Procesado',
-    deleteOrder: 'Eliminar Orden',
+    deleteSelected: 'Eliminar Seleccionados',
+    selectedOrdersCount: '{0} seleccionados',
+    confirmDeleteSelectedOrders: '¿Estás seguro de que quieres eliminar permanentemente las {0} órdenes seleccionadas? Esta acción no se puede deshacer.',
     confirmDeleteOrder: '¿Estás seguro de que quieres eliminar permanentemente la orden {0}? Esta acción no se puede deshacer.',
 
     // Detail View
@@ -267,7 +271,9 @@ export const translations = {
     feeExec: 'Taxa (Exec.)',
     process: 'Processar',
     processed: 'Processado',
-    deleteOrder: 'Excluir Pedido',
+    deleteSelected: 'Excluir Selecionados',
+    selectedOrdersCount: '{0} selecionados',
+    confirmDeleteSelectedOrders: 'Tem certeza de que deseja excluir permanentemente os {0} pedidos selecionados? Esta ação não pode ser desfeita.',
     confirmDeleteOrder: 'Tem certeza de que deseja excluir permanentemente o pedido {0}? Esta ação não pode ser desfeita.',
 
     // Detail View

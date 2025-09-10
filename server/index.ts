@@ -1,6 +1,6 @@
-// FIX: Changed express import to use the default export to avoid type conflicts with global Request/Response.
-// Using express.Request and express.Response for type annotations.
-import express from 'express';
+// FIX: Use named imports for Request and Response from express to avoid type conflicts with global types.
+// FIX: Alias Request and Response from express to avoid type conflicts with other libraries.
+import express, { Request as ExpressRequest, Response as ExpressResponse } from 'express';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -80,8 +80,8 @@ app.use(express.json({ limit: '10mb' }));
 // --- API Routes ---
 
 // GET all orders
-// FIX: Use explicit Request and Response types from express to avoid type conflicts.
-app.get('/api/orders', async (req: express.Request, res: express.Response) => {
+// FIX: Use aliased ExpressRequest and ExpressResponse types to avoid type conflicts.
+app.get('/api/orders', async (req: ExpressRequest, res: ExpressResponse) => {
     try {
         const result = await pool.query('SELECT * FROM orders ORDER BY "createdAt" DESC');
         res.json(result.rows);
@@ -92,8 +92,8 @@ app.get('/api/orders', async (req: express.Request, res: express.Response) => {
 });
 
 // POST a new order
-// FIX: Use explicit Request and Response types from express to avoid type conflicts.
-app.post('/api/orders', async (req: express.Request, res: express.Response) => {
+// FIX: Use aliased ExpressRequest and ExpressResponse types to avoid type conflicts.
+app.post('/api/orders', async (req: ExpressRequest, res: ExpressResponse) => {
     const { id, totalAmount, status, createdAt, links } = req.body;
     if (!id || totalAmount === undefined || !status || !createdAt || !links) {
         return res.status(400).json({ error: 'Missing required fields for order.' });
@@ -114,8 +114,8 @@ app.post('/api/orders', async (req: express.Request, res: express.Response) => {
 });
 
 // PUT (update) an existing order
-// FIX: Use explicit Request and Response types from express to avoid type conflicts.
-app.put('/api/orders/:id', async (req: express.Request, res: express.Response) => {
+// FIX: Use aliased ExpressRequest and ExpressResponse types to avoid type conflicts.
+app.put('/api/orders/:id', async (req: ExpressRequest, res: ExpressResponse) => {
     const { id } = req.params;
     const { totalAmount, status, links, extractedData, executionTotals, isExecutionRegistered } = req.body;
     if (totalAmount === undefined || !status || !links) {
@@ -149,8 +149,8 @@ app.put('/api/orders/:id', async (req: express.Request, res: express.Response) =
 });
 
 // DELETE an order
-// FIX: Use explicit Request and Response types from express to avoid type conflicts.
-app.delete('/api/orders/:id', async (req: express.Request, res: express.Response) => {
+// FIX: Use aliased ExpressRequest and ExpressResponse types to avoid type conflicts.
+app.delete('/api/orders/:id', async (req: ExpressRequest, res: ExpressResponse) => {
     const { id } = req.params;
     try {
         const result = await pool.query('DELETE FROM orders WHERE id = $1', [id]);
@@ -164,8 +164,26 @@ app.delete('/api/orders/:id', async (req: express.Request, res: express.Response
     }
 });
 
-// FIX: Use explicit Request and Response types from express to avoid type conflicts.
-app.post('/api/extract-data', async (req: express.Request, res: express.Response) => {
+// POST for bulk deletion
+// FIX: Use aliased ExpressRequest and ExpressResponse types to avoid type conflicts.
+app.post('/api/orders/bulk-delete', async (req: ExpressRequest, res: ExpressResponse) => {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+        return res.status(400).json({ error: 'An array of order IDs is required.' });
+    }
+    try {
+        // Using ANY for efficient deletion of multiple rows
+        const query = 'DELETE FROM orders WHERE id = ANY($1::text[])';
+        const result = await pool.query(query, [ids]);
+        res.status(200).json({ message: `${result.rowCount} orders deleted successfully.` });
+    } catch (error) {
+        console.error('Error during bulk delete:', error);
+        res.status(500).json({ error: 'Failed to delete orders from database.' });
+    }
+});
+
+// FIX: Use aliased ExpressRequest and ExpressResponse types to avoid type conflicts.
+app.post('/api/extract-data', async (req: ExpressRequest, res: ExpressResponse) => {
     const { base64Image, mimeType, prompt } = req.body;
 
     if (!base64Image || !mimeType || !prompt) {
@@ -234,8 +252,8 @@ if (process.env.NODE_ENV === 'production') {
     const __dirname = path.dirname(__filename);
     const frontendDistPath = path.join(__dirname, '..', '..', 'dist');
     app.use(express.static(frontendDistPath));
-    // FIX: Use explicit Request and Response types from express to avoid type conflicts.
-    app.get('*', (req: express.Request, res: express.Response) => {
+    // FIX: Use aliased ExpressRequest and ExpressResponse types to avoid type conflicts.
+    app.get('*', (req: ExpressRequest, res: ExpressResponse) => {
         res.sendFile(path.join(frontendDistPath, 'index.html'));
     });
 }

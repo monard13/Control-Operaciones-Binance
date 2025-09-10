@@ -777,6 +777,8 @@ const App: React.FC = () => {
     // State for orders management
     const [orders, setOrders] = useState<Order[]>([]);
     const [viewState, setViewState] = useState<ViewState>({ view: 'dashboard', orderId: null });
+    const [selectedOrders, setSelectedOrders] = useState<Set<string>>(new Set());
+
     
     // Debounced function to save order updates to the backend
     const updateOrderInDb = useCallback(
@@ -1010,6 +1012,7 @@ const App: React.FC = () => {
         setError(null);
         setLinksToGenerate(0);
         setPurchaseOrderCode(null);
+        setSelectedOrders(new Set());
     };
 
     const handleSaveOperation = async () => {
@@ -1141,25 +1144,51 @@ const App: React.FC = () => {
         updateOrder(orderId, { executionTotals: totals, isExecutionRegistered: true });
     };
 
-    const handleDeleteOrder = async (orderIdToDelete: string) => {
-        if (!window.confirm(t('confirmDeleteOrder', orderIdToDelete))) {
+    const handleToggleSelectOrder = (orderId: string) => {
+        setSelectedOrders(prevSelected => {
+            const newSelected = new Set(prevSelected);
+            if (newSelected.has(orderId)) {
+                newSelected.delete(orderId);
+            } else {
+                newSelected.add(orderId);
+            }
+            return newSelected;
+        });
+    };
+
+    const handleToggleSelectAll = () => {
+        if (selectedOrders.size === orders.length) {
+            setSelectedOrders(new Set());
+        } else {
+            setSelectedOrders(new Set(orders.map(o => o.id)));
+        }
+    };
+
+    const handleDeleteSelectedOrders = async () => {
+        const idsToDelete = Array.from(selectedOrders);
+        if (idsToDelete.length === 0) return;
+
+        if (!window.confirm(t('confirmDeleteSelectedOrders', idsToDelete.length))) {
             return;
         }
 
         try {
-            const response = await fetch(`/api/orders/${orderIdToDelete}`, {
-                method: 'DELETE',
+            const response = await fetch('/api/orders/bulk-delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids: idsToDelete }),
             });
 
             if (!response.ok) {
                  const errorData = await response.json().catch(() => ({ error: 'An unknown error occurred during deletion.' }));
-                 throw new Error(errorData.error || `Failed to delete order. Status: ${response.status}`);
+                 throw new Error(errorData.error || `Failed to delete orders. Status: ${response.status}`);
             }
             
-            setOrders(prevOrders => prevOrders.filter(order => order.id !== orderIdToDelete));
+            setOrders(prev => prev.filter(order => !selectedOrders.has(order.id)));
+            setSelectedOrders(new Set());
 
         } catch(e) {
-            setError(e instanceof Error ? e.message : 'Failed to delete operation.');
+            setError(e instanceof Error ? e.message : 'Failed to delete operations.');
             setTimeout(() => setError(null), 5000);
         }
     };
@@ -1198,14 +1227,20 @@ const App: React.FC = () => {
             case 'detail':
                 return currentOrder && (
                     <>
-                        <div className="flex justify-between items-center mb-6">
+                        <div className="flex justify-between items-start mb-6">
                             <div>
                                 <h1 className="text-4xl font-bold text-cyan-400">{t('orderDetailTitle')}</h1>
                                 <p className="text-slate-400 mt-2 font-mono">{purchaseOrderCode}</p>
                             </div>
-                             <button onClick={handleBackToList} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors duration-200 text-sm py-2 px-4 rounded-md hover:bg-slate-700">
-                                <ArrowUturnLeftIcon className="w-5 h-5"/> {t('backToList')}
-                            </button>
+                            <div className="flex items-center gap-6">
+                                <div className="text-right">
+                                    <p className="text-slate-400 text-sm font-semibold">{t('totalAmount')}</p>
+                                    <p className="text-2xl font-bold text-white font-mono">{formatCurrency(currentOrder.totalAmount)}</p>
+                                </div>
+                                <button onClick={handleBackToList} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors duration-200 text-sm py-2 px-4 rounded-md hover:bg-slate-700">
+                                    <ArrowUturnLeftIcon className="w-5 h-5"/> {t('backToList')}
+                                </button>
+                            </div>
                         </div>
                         {generatedLinks.length > 0 ? (
                            <div className="max-h-[28rem] overflow-y-auto pr-2 bg-slate-900/50 p-4 rounded-lg border border-slate-700">
@@ -1349,12 +1384,36 @@ const App: React.FC = () => {
                         
                         {orders.length > 0 && (
                             <div className="mt-12">
-                                 <h2 className="text-2xl font-bold text-slate-300 mb-4">{t('registeredOrders')}</h2>
+                                <div className="flex justify-between items-center mb-4">
+                                     <h2 className="text-2xl font-bold text-slate-300">{t('registeredOrders')}</h2>
+                                     {selectedOrders.size > 0 && (
+                                        <div className="flex items-center gap-4 bg-slate-700/50 p-2 rounded-lg">
+                                            <p className="text-sm text-slate-300 px-2">{t('selectedOrdersCount', selectedOrders.size)}</p>
+                                            <button
+                                                onClick={handleDeleteSelectedOrders}
+                                                className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-3 rounded-md text-sm transition-colors"
+                                                aria-label={t('deleteSelected')}
+                                            >
+                                                <TrashIcon className="w-5 h-5"/>
+                                                <span>{t('deleteSelected')}</span>
+                                            </button>
+                                        </div>
+                                     )}
+                                </div>
                                  <div className="bg-slate-900/50 rounded-lg border border-slate-700 overflow-hidden">
                                     <div className="overflow-x-auto">
                                         <table className="w-full text-left min-w-max">
                                             <thead className="bg-slate-800 text-xs text-slate-400 uppercase tracking-wider">
                                                 <tr>
+                                                    <th scope="col" className="px-4 py-3">
+                                                        <input
+                                                            type="checkbox"
+                                                            aria-label="Seleccionar todas las órdenes"
+                                                            checked={orders.length > 0 && selectedOrders.size === orders.length}
+                                                            onChange={handleToggleSelectAll}
+                                                            className="h-4 w-4 rounded border-slate-500 bg-slate-800 text-cyan-600 focus:ring-cyan-500"
+                                                        />
+                                                    </th>
                                                     <th scope="col" className="px-6 py-3">{t('poCode')}</th>
                                                     <th scope="col" className="px-6 py-3">{t('date')}</th>
                                                     <th scope="col" className="px-6 py-3">{t('totalAmount')}</th>
@@ -1363,7 +1422,6 @@ const App: React.FC = () => {
                                                     <th scope="col" className="px-6 py-3">{t('feeExec')}</th>
                                                     <th scope="col" className="px-6 py-3">{t('status')}</th>
                                                     <th scope="col" className="px-6 py-3">{t('action')}</th>
-                                                    <th scope="col" className="relative px-6 py-3"><span className="sr-only">{t('deleteOrder')}</span></th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-slate-700">
@@ -1383,7 +1441,16 @@ const App: React.FC = () => {
 
 
                                                     return (
-                                                        <tr key={order.id} className="hover:bg-slate-700/50 transition-colors">
+                                                        <tr key={order.id} className={`transition-colors ${selectedOrders.has(order.id) ? 'bg-slate-700' : 'hover:bg-slate-800'}`}>
+                                                            <td className="px-4 py-4">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    aria-label={`Seleccionar orden ${order.id}`}
+                                                                    checked={selectedOrders.has(order.id)}
+                                                                    onChange={() => handleToggleSelectOrder(order.id)}
+                                                                    className="h-4 w-4 rounded border-slate-500 bg-slate-800 text-cyan-600 focus:ring-cyan-500"
+                                                                />
+                                                            </td>
                                                             <td onClick={() => setViewState({ view: 'detail', orderId: order.id })} className="px-6 py-4 font-mono text-cyan-400 whitespace-nowrap cursor-pointer">{order.id}</td>
                                                             <td onClick={() => setViewState({ view: 'detail', orderId: order.id })} className="px-6 py-4 text-slate-300 whitespace-nowrap cursor-pointer">{new Date(order.createdAt).toLocaleString(language)}</td>
                                                             <td onClick={() => setViewState({ view: 'detail', orderId: order.id })} className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap cursor-pointer">{formattedAmount}</td>
@@ -1410,15 +1477,6 @@ const App: React.FC = () => {
                                                                     )
                                                             )}
                                                             </td>
-                                                            <td className="px-6 py-4 text-right">
-                                                                <button
-                                                                    onClick={() => handleDeleteOrder(order.id)}
-                                                                    className="text-slate-500 hover:text-red-400 transition-colors p-1"
-                                                                    aria-label={`${t('deleteOrder')} ${order.id}`}
-                                                                >
-                                                                    <TrashIcon className="w-5 h-5" />
-                                                                </button>
-                                                            </td>
                                                         </tr>
                                                     );
                                                 })}
@@ -1435,7 +1493,7 @@ const App: React.FC = () => {
     
     return (
         <div className="bg-slate-900 text-white min-h-screen flex flex-col items-center p-4 font-sans selection:bg-cyan-500 selection:text-slate-900">
-            <main className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-2xl shadow-2xl p-6 sm:p-8 w-full max-w-5xl transition-all duration-300 relative">
+            <main className="bg-slate-800/50 backdrop-blur-sm border border-slate-700 rounded-2xl shadow-2xl p-6 sm:p-8 w-full max-w-7xl transition-all duration-300 relative">
                  <button onClick={() => setShowConfig(!showConfig)} className="absolute top-6 right-6 text-slate-400 hover:text-cyan-400 transition-colors z-10" aria-label={t('config')}>
                     <Cog6ToothIcon className={`w-7 h-7 transition-transform duration-300 ${showConfig ? 'rotate-90' : ''}`}/>
                 </button>
@@ -1474,6 +1532,7 @@ const App: React.FC = () => {
                 .overflow-y-auto::-webkit-scrollbar-track { background: transparent; }
                 .overflow-y-auto::-webkit-scrollbar-thumb { background-color: #475569; border-radius: 20px; border: 3px solid #1e293b; }
                 .overflow-y-auto::-webkit-scrollbar-thumb:hover { background-color: #64748b; }
+                main { max-width: 80rem; }
             `}</style>
         </div>
     );
