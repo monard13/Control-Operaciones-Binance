@@ -1,0 +1,5 @@
+{
+  "name": "Control Operaciones Binance",
+  "description": "Una aplicación para generar y gestionar una serie de links de pago basados en un monto total de Orden de Compra.",
+  "requestFramePermissions": []
+}
