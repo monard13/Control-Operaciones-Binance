@@ -46,6 +46,15 @@ interface ViewState {
     orderId: string | null;
 }
 
+// Helper function for debouncing API calls
+const debounce = (func: (...args: any[]) => void, delay: number) => {
+    let timeoutId: ReturnType<typeof setTimeout>;
+    return function(this: any, ...args: any[]) {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => func.apply(this, args), delay);
+    };
+};
+
 // Helper Functions
 const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -280,7 +289,6 @@ const ExecutionProcessor: React.FC<{
                 }
                 const base64Image = await fileToBase64(file);
                 
-                // Call the backend instead of Gemini directly
                 const response = await fetch('/api/extract-data', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -770,6 +778,26 @@ const App: React.FC = () => {
     const [orders, setOrders] = useState<Order[]>([]);
     const [viewState, setViewState] = useState<ViewState>({ view: 'dashboard', orderId: null });
     
+    // Debounced function to save order updates to the backend
+    const updateOrderInDb = useCallback(
+        debounce(async (orderToUpdate: Order) => {
+            try {
+                const response = await fetch(`/api/orders/${orderToUpdate.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(orderToUpdate),
+                });
+                if (!response.ok) {
+                    console.error('Failed to save order update to the server.');
+                    // Here you might want to show an error to the user
+                }
+            } catch (err) {
+                console.error("Error sending order update to server:", err);
+            }
+        }, 1000), // Debounce updates by 1 second
+        []
+    );
+    
     // Effect to fetch initial data from backend
     useEffect(() => {
         const fetchOrders = async () => {
@@ -782,30 +810,12 @@ const App: React.FC = () => {
                 setOrders(data);
             } catch (error) {
                 console.error("Failed to fetch orders:", error);
-                // Here you could set an error state to show a message to the user
+                setError(t('errorOccurred'));
             }
         };
 
         fetchOrders();
-    }, []); // Empty dependency array means this runs once on mount
-
-    // Effect to auto-update order status to 'pagado'
-    useEffect(() => {
-        setOrders(prevOrders => {
-            let hasChanged = false;
-            const updatedOrders = prevOrders.map(order => {
-                if (order.links.length > 0 && order.status === 'pendiente') {
-                    const allPaid = order.links.every(link => link.isPaid);
-                    if (allPaid) {
-                        hasChanged = true;
-                        return { ...order, status: 'pagado' as 'pagado' };
-                    }
-                }
-                return order;
-            });
-            return hasChanged ? updatedOrders : prevOrders;
-        });
-    }, [orders]);
+    }, [t]); // Add 't' dependency for error message translation
 
     // Sync UI with selected order data for detail view
     useEffect(() => {
@@ -1010,7 +1020,7 @@ const App: React.FC = () => {
         setPurchaseOrderCode(null);
     };
 
-    const handleSaveOperation = () => {
+    const handleSaveOperation = async () => {
         if (!purchaseOrderCode || generatedLinks.length === 0) return;
 
         const newOrder: Order = {
@@ -1020,14 +1030,45 @@ const App: React.FC = () => {
             createdAt: new Date().toISOString(),
             links: generatedLinks,
         };
-        // In a real app with a DB, this would be a POST request to /api/orders
-        setOrders(prevOrders => [...prevOrders, newOrder]);
-        handleClear();
+        
+        try {
+            const response = await fetch('/api/orders', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(newOrder),
+            });
+            if (!response.ok) {
+                const err = await response.json();
+                throw new Error(err.error || 'Failed to save order');
+            }
+            const savedOrder = await response.json();
+            setOrders(prevOrders => [savedOrder, ...prevOrders]); // Prepend new order to list
+            handleClear();
+        } catch(e) {
+            setError(e instanceof Error ? e.message : 'Failed to register operation.');
+        }
     };
 
     const handleBackToList = () => {
         setViewState({ view: 'generator', orderId: null });
         handleClear();
+    };
+
+    const updateOrder = (orderId: string, updatedFields: Partial<Order>) => {
+        let updatedOrder: Order | undefined;
+        setOrders(prevOrders => {
+            const newOrders = prevOrders.map(order => {
+                if (order.id === orderId) {
+                    updatedOrder = { ...order, ...updatedFields };
+                    return updatedOrder;
+                }
+                return order;
+            });
+            if (updatedOrder) {
+                updateOrderInDb(updatedOrder);
+            }
+            return newOrders;
+        });
     };
 
     const handleLinkChange = (id: string, url: string) => {
@@ -1036,10 +1077,11 @@ const App: React.FC = () => {
             setGeneratedLinks(prev => prev.map(item => item.id === id ? { ...item, linkUrl: url } : item));
             return;
         }
-        setOrders(prev => prev.map(order => order.id === orderId 
-            ? { ...order, links: order.links.map(l => l.id === id ? {...l, linkUrl: url} : l) } 
-            : order
-        ));
+        const orderToUpdate = orders.find(o => o.id === orderId);
+        if (!orderToUpdate) return;
+        
+        const updatedLinks = orderToUpdate.links.map(l => l.id === id ? {...l, linkUrl: url} : l);
+        updateOrder(orderId, { links: updatedLinks });
     };
 
     const handlePaidChange = (id: string, isPaid: boolean) => {
@@ -1048,10 +1090,13 @@ const App: React.FC = () => {
             setGeneratedLinks(prev => prev.map(item => item.id === id ? { ...item, isPaid } : item));
             return;
         }
-        setOrders(prev => prev.map(order => order.id === orderId 
-            ? { ...order, links: order.links.map(l => l.id === id ? {...l, isPaid} : l) } 
-            : order
-        ));
+        const orderToUpdate = orders.find(o => o.id === orderId);
+        if (!orderToUpdate) return;
+
+        const updatedLinks = orderToUpdate.links.map(l => l.id === id ? { ...l, isPaid } : l);
+        const allPaid = updatedLinks.every(l => l.isPaid);
+
+        updateOrder(orderId, { links: updatedLinks, status: allPaid ? 'pagado' : 'pendiente' });
     };
 
     const handleValueChange = (id: string, value: number) => {
@@ -1069,13 +1114,10 @@ const App: React.FC = () => {
             return;
         }
 
-        setOrders(prevOrders => prevOrders.map(order => {
-            if (order.id === orderId) {
-                const { newLinks, newTotal } = updateAndRecalculate(order.links);
-                return { ...order, links: newLinks, totalAmount: newTotal };
-            }
-            return order;
-        }));
+        const orderToUpdate = orders.find(o => o.id === orderId);
+        if (!orderToUpdate) return;
+        const { newLinks, newTotal } = updateAndRecalculate(orderToUpdate.links);
+        updateOrder(orderId, { links: newLinks, totalAmount: newTotal });
     };
     
     const handleDeleteItem = (id: string) => {
@@ -1091,31 +1133,20 @@ const App: React.FC = () => {
             }
             return;
         }
-
-        setOrders(prevOrders => prevOrders.map(order => {
-            if (order.id === orderId) {
-                const updatedLinks = order.links.filter(item => item.id !== id);
-                if (updatedLinks.length === 0) {
-                    // if all items are deleted from an order, maybe go back to list?
-                    // for now, just update it to be empty.
-                }
-                const newTotal = updatedLinks.reduce((sum, item) => sum + item.value, 0);
-                return { ...order, links: updatedLinks, totalAmount: newTotal };
-            }
-            return order;
-        }));
+        const orderToUpdate = orders.find(o => o.id === orderId);
+        if (!orderToUpdate) return;
+        
+        const updatedLinks = orderToUpdate.links.filter(item => item.id !== id);
+        const newTotal = updatedLinks.reduce((sum, item) => sum + item.value, 0);
+        updateOrder(orderId, { links: updatedLinks, totalAmount: newTotal });
     };
 
     const handleSaveExtractedData = (orderId: string, data: ExtractedInfo[]) => {
-        setOrders(prev => prev.map(order => order.id === orderId ? {...order, extractedData: data} : order));
+        updateOrder(orderId, { extractedData: data });
     };
 
     const handleRegisterExecution = (orderId: string, totals: OrderTotals) => {
-        setOrders(prev => prev.map(order => 
-            order.id === orderId 
-            ? { ...order, executionTotals: totals, isExecutionRegistered: true } 
-            : order
-        ));
+        updateOrder(orderId, { executionTotals: totals, isExecutionRegistered: true });
     };
 
     const currentOrder = viewState.orderId ? orders.find(o => o.id === viewState.orderId) : null;

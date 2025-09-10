@@ -1,12 +1,56 @@
 
-// FIX: Import Request and Response types from express to fix typing issues with request handlers and middleware.
-import express, { Request, Response } from 'express';
+
+// FIX: Changed express import to `require` syntax for better CommonJS compatibility and to resolve type conflicts.
+import express = require('express');
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { GoogleGenAI, Type } from "@google/genai";
+import pg from 'pg';
 
-// Ensure API_KEY is set
+const { Pool } = pg;
+
+// --- Database Setup ---
+if (!process.env.DATABASE_URL) {
+  throw new Error("DATABASE_URL environment variable not set");
+}
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  // Required for Render's managed database connections
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+});
+
+async function initializeDatabase() {
+  const client = await pool.connect();
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS orders (
+        id VARCHAR(255) PRIMARY KEY,
+        "totalAmount" NUMERIC NOT NULL,
+        status VARCHAR(50) NOT NULL,
+        "createdAt" TIMESTAMPTZ NOT NULL,
+        links JSONB NOT NULL,
+        "extractedData" JSONB,
+        "executionTotals" JSONB,
+        "isExecutionRegistered" BOOLEAN DEFAULT FALSE
+      );
+    `);
+    console.log("Database initialized successfully. 'orders' table is ready.");
+  } catch (err) {
+    console.error("Error initializing database:", err);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+initializeDatabase().catch(err => {
+    console.error("Failed to initialize database on startup:", err);
+    process.exit(1);
+});
+
+// --- Gemini API Setup ---
 const API_KEY = process.env.API_KEY;
 if (!API_KEY) {
   throw new Error("API_KEY environment variable not set");
@@ -16,7 +60,7 @@ const ai = new GoogleGenAI({ apiKey: API_KEY });
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Interfaces (could be moved to a shared types file in a larger project)
+// Interfaces
 interface ExtractedInfo {
   orderNumber: string;
   type: string;
@@ -32,19 +76,81 @@ interface ExtractedInfo {
 
 // Middleware
 app.use(cors());
-// Increase payload size limit for base64 images
 app.use(express.json({ limit: '10mb' }));
 
-// API routes
-// FIX: Use correct types for request and response objects.
-app.get('/api/orders', (req: Request, res: Response) => {
-    // In a real app, you'd fetch this from a database.
-    // For now, returning an empty array to match initial frontend state.
-    res.json([]);
+// --- API Routes ---
+
+// GET all orders
+// FIX: Use explicit express.Request and express.Response types to avoid type conflicts.
+app.get('/api/orders', async (req: express.Request, res: express.Response) => {
+    try {
+        const result = await pool.query('SELECT * FROM orders ORDER BY "createdAt" DESC');
+        res.json(result.rows);
+    } catch (error) {
+        console.error("Error fetching orders:", error);
+        res.status(500).json({ error: 'Failed to fetch orders from database.' });
+    }
 });
 
-// FIX: Use correct types for request and response objects.
-app.post('/api/extract-data', async (req: Request, res: Response) => {
+// POST a new order
+// FIX: Use explicit express.Request and express.Response types to avoid type conflicts.
+app.post('/api/orders', async (req: express.Request, res: express.Response) => {
+    const { id, totalAmount, status, createdAt, links } = req.body;
+    if (!id || totalAmount === undefined || !status || !createdAt || !links) {
+        return res.status(400).json({ error: 'Missing required fields for order.' });
+    }
+    try {
+        const query = `
+            INSERT INTO orders(id, "totalAmount", status, "createdAt", links)
+            VALUES($1, $2, $3, $4, $5)
+            RETURNING *;
+        `;
+        const values = [id, totalAmount, status, createdAt, JSON.stringify(links)];
+        const result = await pool.query(query, values);
+        res.status(201).json(result.rows[0]);
+    } catch (error) {
+        console.error("Error creating order:", error);
+        res.status(500).json({ error: 'Failed to save order to database.' });
+    }
+});
+
+// PUT (update) an existing order
+// FIX: Use explicit express.Request and express.Response types to avoid type conflicts.
+app.put('/api/orders/:id', async (req: express.Request, res: express.Response) => {
+    const { id } = req.params;
+    const { totalAmount, status, links, extractedData, executionTotals, isExecutionRegistered } = req.body;
+    if (totalAmount === undefined || !status || !links) {
+        return res.status(400).json({ error: 'Missing required fields for order update.' });
+    }
+    try {
+        const query = `
+            UPDATE orders
+            SET "totalAmount" = $1, status = $2, links = $3, "extractedData" = $4, "executionTotals" = $5, "isExecutionRegistered" = $6
+            WHERE id = $7
+            RETURNING *;
+        `;
+        const values = [
+            totalAmount,
+            status,
+            JSON.stringify(links),
+            extractedData ? JSON.stringify(extractedData) : null,
+            executionTotals ? JSON.stringify(executionTotals) : null,
+            isExecutionRegistered || false,
+            id
+        ];
+        const result = await pool.query(query, values);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Order not found.' });
+        }
+        res.json(result.rows[0]);
+    } catch (error) {
+        console.error(`Error updating order ${id}:`, error);
+        res.status(500).json({ error: 'Failed to update order in database.' });
+    }
+});
+
+// FIX: Use explicit express.Request and express.Response types to avoid type conflicts.
+app.post('/api/extract-data', async (req: express.Request, res: express.Response) => {
     const { base64Image, mimeType, prompt } = req.body;
 
     if (!base64Image || !mimeType || !prompt) {
@@ -108,21 +214,13 @@ app.post('/api/extract-data', async (req: Request, res: Response) => {
 
 
 // Serve frontend
-// This part is crucial for Render deployment
 if (process.env.NODE_ENV === 'production') {
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = path.dirname(__filename);
-    
-    // The compiled server code is in server/dist, so we go up two levels to the project root, then into the frontend 'dist' folder.
     const frontendDistPath = path.join(__dirname, '..', '..', 'dist');
-
-    // Serve static files from the React app build directory
     app.use(express.static(frontendDistPath));
-
-    // The "catchall" handler: for any request that doesn't
-    // match one above, send back React's index.html file.
-    // FIX: Use correct types for request and response objects.
-    app.get('*', (req: Request, res: Response) => {
+    // FIX: Use explicit express.Request and express.Response types to avoid type conflicts.
+    app.get('*', (req: express.Request, res: express.Response) => {
         res.sendFile(path.join(frontendDistPath, 'index.html'));
     });
 }
