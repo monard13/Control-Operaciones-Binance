@@ -565,7 +565,11 @@ const ExecutionProcessor: React.FC<{
     );
 };
 
-const HistoryView: React.FC<{ orders: Order[], language: Language }> = ({ orders, language }) => {
+const HistoryView: React.FC<{
+    orders: Order[];
+    language: Language;
+    formatCurrency: (value: number) => string;
+}> = ({ orders, language, formatCurrency }) => {
     const { t } = useLanguage();
     const [startDate, setStartDate] = useState('');
     const [endDate, setEndDate] = useState('');
@@ -701,12 +705,7 @@ const HistoryView: React.FC<{ orders: Order[], language: Language }> = ({ orders
                             {filteredOrders.length > 0 ? filteredOrders.map(order => {
                                 const totals = order.executionTotals!;
                                 const locale = language === 'pt' ? 'pt-BR' : language === 'en' ? 'en-US' : 'es-CL';
-                                const formattedAmount = new Intl.NumberFormat(locale, {
-                                    style: 'currency',
-                                    currency: 'CLP',
-                                    minimumFractionDigits: 2,
-                                    maximumFractionDigits: 2,
-                                }).format(order.totalAmount);
+                                const formattedAmount = formatCurrency(order.totalAmount);
                                 
                                 return (
                                     <tr key={order.id} className="hover:bg-slate-700/50 transition-colors text-sm">
@@ -1214,20 +1213,37 @@ const App: React.FC = () => {
 
     const currentOrder = viewState.orderId ? orders.find(o => o.id === viewState.orderId) : null;
     
-    const formatNumber = useCallback((value: number, options?: Intl.NumberFormatOptions) => {
+    const formatCurrency = useCallback((value: number, options?: Intl.NumberFormatOptions) => {
         const locale = language === 'pt' ? 'pt-BR' : language === 'en' ? 'en-US' : 'es-CL';
-        return new Intl.NumberFormat(locale, {
+        const formatter = new Intl.NumberFormat(locale, {
+            style: 'currency',
+            currency: 'CLP',
             minimumFractionDigits: 2,
             maximumFractionDigits: 2,
             ...options
-        }).format(value);
+        });
+        
+        try {
+            // Modern approach using formatToParts for robustness
+            const parts = formatter.formatToParts(value);
+            const currencyPart = parts.find(p => p.type === 'currency');
+            
+            // If the currency symbol/code is 'CLP', replace it with just '$'
+            if (currencyPart && currencyPart.value.includes('CLP')) {
+                currencyPart.value = '$';
+            }
+            
+            return parts.map(p => p.value).join('');
+        } catch (e) {
+            // Fallback for older environments
+            const formatted = formatter.format(value);
+            return formatted.replace(/CLP\s*/, '$');
+        }
     }, [language]);
 
-    const formatCurrency = useCallback((value: number, options?: Intl.NumberFormatOptions) => {
+    const formatNumber = useCallback((value: number, options?: Intl.NumberFormatOptions) => {
         const locale = language === 'pt' ? 'pt-BR' : language === 'en' ? 'en-US' : 'es-CL';
         return new Intl.NumberFormat(locale, {
-            style: 'currency',
-            currency: 'CLP',
             minimumFractionDigits: 2,
             maximumFractionDigits: 2,
             ...options
@@ -1245,7 +1261,7 @@ const App: React.FC = () => {
     const renderContent = () => {
         switch (viewState.view) {
             case 'history':
-                return <HistoryView orders={orders} language={language} />;
+                return <HistoryView orders={orders} language={language} formatCurrency={formatCurrency} />;
             case 'processing':
                 return currentOrder && (
                     <ExecutionProcessor 
