@@ -72,15 +72,29 @@ const parseCurrencyValue = (valueStr: string | undefined): { amount: number, cur
     if (!valueStr) return { amount: 0, currency: null };
 
     const cleanedStr = valueStr.split('/')[0].trim();
-    
-    const match = cleanedStr.match(/^([\d.,\s]+)(?:\s*([A-Z]{3,}))?$/);
+    // Use a non-greedy match for the number part to correctly separate currency
+    const match = cleanedStr.match(/^(.*?)(?:\s*([A-Z]{3,}))?$/);
 
     if (!match) return { amount: 0, currency: null };
 
-    let numberPart = match[1].trim();
+    let numberPart = (match[1] || '').trim();
     const currency = match[2] || null;
 
-    numberPart = numberPart.replace(/\./g, '').replace(/,/g, '.');
+    if (!numberPart) return { amount: 0, currency: null };
+
+    const lastComma = numberPart.lastIndexOf(',');
+    const lastDot = numberPart.lastIndexOf('.');
+
+    // If comma is the last separator, it's the decimal point (European style)
+    if (lastComma > lastDot) {
+        // e.g., "1.234,56" -> "1234.56"
+        numberPart = numberPart.replace(/\./g, '').replace(',', '.');
+    } else if (lastDot > lastComma) {
+        // If dot is the last separator, it's the decimal point (American style)
+        // e.g., "1,234.56" -> "1234.56"
+        numberPart = numberPart.replace(/,/g, '');
+    }
+    // If no separators, or only one type, parseFloat should handle it (e.g., "1234" or "1234.56")
     
     const amount = parseFloat(numberPart);
 
@@ -168,7 +182,8 @@ const ExecutionProcessor: React.FC<{
     onBack: () => void;
     onSaveData: (orderId: string, data: ExtractedInfo[]) => void;
     onRegister: (orderId: string, totals: OrderTotals) => void;
-}> = ({ order, onBack, onSaveData, onRegister }) => {
+    formatNumber: (num: number, options?: Intl.NumberFormatOptions) => string;
+}> = ({ order, onBack, onSaveData, onRegister, formatNumber }) => {
     const { t } = useLanguage();
     const [files, setFiles] = useState<File[]>([]);
     const [isLoading, setIsLoading] = useState(false);
@@ -219,8 +234,6 @@ const ExecutionProcessor: React.FC<{
             }
         }
         
-        const formatNumber = (num: number) => new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num);
-
         const filledQuantity = `${formatNumber(totalsData.quantity)} / ${formatNumber(totalsData.quantity)}`;
         const fee = Array.from(totalsData.fees.entries()).map(([curr, val]) => `${formatNumber(val)} ${curr}`).join(', ');
         const total = Array.from(totalsData.totals.entries()).map(([curr, val]) => `${formatNumber(val)} ${curr}`).join(', ');
@@ -234,7 +247,7 @@ const ExecutionProcessor: React.FC<{
             total,
             averagePrice,
         };
-    }, [extractedData]);
+    }, [extractedData, formatNumber]);
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (isRegistered || !e.target.files) return;
@@ -1201,7 +1214,16 @@ const App: React.FC = () => {
 
     const currentOrder = viewState.orderId ? orders.find(o => o.id === viewState.orderId) : null;
     
-    const formatCurrency = (value: number, options?: Intl.NumberFormatOptions) => {
+    const formatNumber = useCallback((value: number, options?: Intl.NumberFormatOptions) => {
+        const locale = language === 'pt' ? 'pt-BR' : language === 'en' ? 'en-US' : 'es-CL';
+        return new Intl.NumberFormat(locale, {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
+            ...options
+        }).format(value);
+    }, [language]);
+
+    const formatCurrency = useCallback((value: number, options?: Intl.NumberFormatOptions) => {
         const locale = language === 'pt' ? 'pt-BR' : language === 'en' ? 'en-US' : 'es-CL';
         return new Intl.NumberFormat(locale, {
             style: 'currency',
@@ -1210,14 +1232,15 @@ const App: React.FC = () => {
             maximumFractionDigits: 2,
             ...options
         }).format(value);
-    };
+    }, [language]);
 
-    const formatTaxa = (taxaMap: Map<string, number>): string => {
-        if (taxaMap.size === 0) return '0.00';
+    const formatTaxa = useCallback((taxaMap: Map<string, number>): string => {
+        if (taxaMap.size === 0) return formatNumber(0);
         return Array.from(taxaMap.entries())
-            .map(([currency, value]) => `${value.toFixed(2)} ${currency}`)
+            .map(([currency, value]) => `${formatNumber(value, { maximumFractionDigits: 4 })} ${currency}`)
             .join(', ');
-    };
+    }, [language, formatNumber]);
+
 
     const renderContent = () => {
         switch (viewState.view) {
@@ -1230,6 +1253,7 @@ const App: React.FC = () => {
                         onBack={handleBackToList} 
                         onSaveData={handleSaveExtractedData}
                         onRegister={handleRegisterExecution}
+                        formatNumber={formatNumber}
                     />
                 );
             case 'detail':
@@ -1279,8 +1303,8 @@ const App: React.FC = () => {
                             <DashboardCard title={t('totalOrders')} value={dashboardMetrics.totalOrders} icon={<QueueListIcon className="w-7 h-7"/>} colorClass="bg-blue-500/30 text-blue-300" />
                             <DashboardCard title={t('totalPendingAmount')} value={formatCurrency(dashboardMetrics.montoTotalPendiente)} icon={<ClockIcon className="w-7 h-7"/>} colorClass="bg-yellow-500/30 text-yellow-300" />
                             <DashboardCard title={t('totalPaidAmount')} value={formatCurrency(dashboardMetrics.montoTotalPagado)} icon={<CheckCircleIcon className="w-7 h-7"/>} colorClass="bg-green-500/30 text-green-300" />
-                            <DashboardCard title={t('totalBRLExecuted')} value={dashboardMetrics.totalBRL.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} icon={<CircleStackIcon className="w-7 h-7"/>} colorClass="bg-indigo-500/30 text-indigo-300" />
-                            <DashboardCard title={t('totalUSDTExecuted')} value={dashboardMetrics.totalUSDT.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} icon={<BanknotesIcon className="w-7 h-7"/>} colorClass="bg-teal-500/30 text-teal-300" />
+                            <DashboardCard title={t('totalBRLExecuted')} value={formatNumber(dashboardMetrics.totalBRL)} icon={<CircleStackIcon className="w-7 h-7"/>} colorClass="bg-indigo-500/30 text-indigo-300" />
+                            <DashboardCard title={t('totalUSDTExecuted')} value={formatNumber(dashboardMetrics.totalUSDT)} icon={<BanknotesIcon className="w-7 h-7"/>} colorClass="bg-teal-500/30 text-teal-300" />
                             <DashboardCard title={t('totalFeesPaid')} value={formatTaxa(dashboardMetrics.totalTaxa)} icon={<ReceiptPercentIcon className="w-7 h-7"/>} colorClass="bg-rose-500/30 text-rose-300" />
                         </div>
                     </div>
