@@ -24,10 +24,10 @@ interface ExtractedInfo {
 }
 
 interface OrderTotals {
-  filledQuantity: string;
-  averagePrice: string;
-  fee: string;
-  total: string;
+  totalQuantity: number;
+  averagePrice: number;
+  totalFees: Record<string, number>;
+  totalCost: Record<string, number>;
 }
 
 interface Order {
@@ -55,6 +55,38 @@ const debounce = (func: (...args: any[]) => void, delay: number) => {
     };
 };
 
+// --- Input Masking Helpers ---
+
+// Converts a raw numeric string (e.g., "123456" for 1234.56) to a formatted currency string
+const formatCurrencyInput = (rawNumericString: string, language: Language): string => {
+    if (!rawNumericString) return '';
+    const locale = language === 'pt' ? 'pt-BR' : language === 'en' ? 'en-US' : 'es-CL';
+    const numberValue = parseInt(rawNumericString, 10) / 100;
+    if (isNaN(numberValue)) return '';
+
+    const formatted = new Intl.NumberFormat(locale, {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+    }).format(numberValue);
+
+    return `$ ${formatted}`;
+};
+
+// Converts a raw numeric string (e.g., "14999") to a formatted integer string
+const formatIntegerInput = (rawNumericString: string, language: Language): string => {
+    if (!rawNumericString) return '';
+    const locale = language === 'pt' ? 'pt-BR' : language === 'en' ? 'en-US' : 'es-CL';
+    const numberValue = parseInt(rawNumericString, 10);
+    if (isNaN(numberValue)) return '';
+    return new Intl.NumberFormat(locale).format(numberValue);
+};
+
+// Converts a user-facing string (masked or not) into a raw string of digits
+const parseToNumericString = (value: string): string => {
+    return value.replace(/[^0-9]/g, '');
+};
+
+
 // Helper Functions
 const fileToBase64 = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
@@ -68,11 +100,11 @@ const fileToBase64 = (file: File): Promise<string> => {
     });
 };
 
-const parseCurrencyValue = (valueStr: string | undefined): { amount: number, currency: string | null } => {
+const parseCurrencyValue = (valueStr: string | undefined, language: Language): { amount: number, currency: string | null } => {
     if (!valueStr) return { amount: 0, currency: null };
 
     const cleanedStr = valueStr.split('/')[0].trim();
-    // Use a non-greedy match for the number part to correctly separate currency
+    // Regex to separate the number part from an optional currency symbol at the end
     const match = cleanedStr.match(/^(.*?)(?:\s*([A-Z]{3,}))?$/);
 
     if (!match) return { amount: 0, currency: null };
@@ -81,21 +113,26 @@ const parseCurrencyValue = (valueStr: string | undefined): { amount: number, cur
     const currency = match[2] || null;
 
     if (!numberPart) return { amount: 0, currency: null };
-
-    const lastComma = numberPart.lastIndexOf(',');
-    const lastDot = numberPart.lastIndexOf('.');
-
-    // If comma is the last separator, it's the decimal point (European style)
-    if (lastComma > lastDot) {
-        // e.g., "1.234,56" -> "1234.56"
-        numberPart = numberPart.replace(/\./g, '').replace(',', '.');
-    } else if (lastDot > lastComma) {
-        // If dot is the last separator, it's the decimal point (American style)
-        // e.g., "1,234.56" -> "1234.56"
-        numberPart = numberPart.replace(/,/g, '');
-    }
-    // If no separators, or only one type, parseFloat should handle it (e.g., "1234" or "1234.56")
     
+    let thousandsSeparator: string;
+    let decimalSeparator: string;
+
+    // Determine separators based on language context
+    if (language === 'en') {
+        thousandsSeparator = ',';
+        decimalSeparator = '.';
+    } else { // 'es' and 'pt' use '.' for thousands and ',' for decimal
+        thousandsSeparator = '.';
+        decimalSeparator = ',';
+    }
+
+    // Create a regex to remove all instances of the thousands separator
+    const thousandsRegex = new RegExp(`\\${thousandsSeparator}`, 'g');
+    numberPart = numberPart.replace(thousandsRegex, '');
+
+    // Replace the decimal separator with a standard '.' for parseFloat
+    numberPart = numberPart.replace(decimalSeparator, '.');
+
     const amount = parseFloat(numberPart);
 
     return { amount: isNaN(amount) ? 0 : amount, currency };
@@ -108,9 +145,20 @@ const LinkItem: React.FC<{
   onPaidChange: (id: string, isPaid: boolean) => void;
   onValueChange: (id: string, value: number) => void;
   onDelete: (id: string) => void;
-}> = ({ item, onLinkChange, onPaidChange, onValueChange, onDelete }) => {
+  language: Language;
+}> = ({ item, onLinkChange, onPaidChange, onValueChange, onDelete, language }) => {
     const [copied, setCopied] = useState(false);
     const { t } = useLanguage();
+    
+    // Local state to manage the masked input value
+    const [maskedValue, setMaskedValue] = useState(() => 
+        formatCurrencyInput(String(Math.round(item.value * 100)), language)
+    );
+
+    // Sync with external changes to the item's value
+    useEffect(() => {
+        setMaskedValue(formatCurrencyInput(String(Math.round(item.value * 100)), language));
+    }, [item.value, language]);
 
     const handleCopy = useCallback(() => {
         if (!item.linkUrl) return;
@@ -118,6 +166,15 @@ const LinkItem: React.FC<{
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
     }, [item.linkUrl]);
+
+    const handleValueInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const numericString = parseToNumericString(e.target.value);
+        const newMaskedValue = formatCurrencyInput(numericString, language);
+        setMaskedValue(newMaskedValue);
+        
+        const numericValue = parseInt(numericString, 10) / 100;
+        onValueChange(item.id, isNaN(numericValue) ? 0 : numericValue);
+    };
 
     return (
         <div className={`bg-slate-700/50 p-4 rounded-lg flex flex-col transition-all duration-300 hover:bg-slate-700 hover:shadow-lg hover:scale-105 ${item.isPaid ? 'opacity-50 border border-green-500/50' : 'border border-transparent'} relative`}>
@@ -129,10 +186,10 @@ const LinkItem: React.FC<{
                 <TrashIcon className="w-5 h-5" />
             </button>
             <input
-                type="number"
-                value={item.value}
-                step="0.01"
-                onChange={(e) => onValueChange(item.id, parseFloat(e.target.value) || 0)}
+                type="text" // Use text for masking
+                inputMode="decimal" // Better mobile keyboard
+                value={maskedValue}
+                onChange={handleValueInputChange}
                 className="font-mono text-lg text-cyan-400 bg-slate-800 border border-slate-600 rounded-md py-2 px-3 w-full mb-2 focus:ring-2 focus:ring-cyan-500 focus:outline-none transition-shadow"
             />
             
@@ -177,7 +234,7 @@ const ExecutionProcessor: React.FC<{
     onRegister: (orderId: string, totals: OrderTotals) => void;
     formatNumber: (num: number, options?: Intl.NumberFormatOptions) => string;
 }> = ({ order, onBack, onSaveData, onRegister, formatNumber }) => {
-    const { t } = useLanguage();
+    const { t, language } = useLanguage();
     const [files, setFiles] = useState<File[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -209,41 +266,34 @@ const ExecutionProcessor: React.FC<{
         const totalsData = {
             quantity: 0,
             fees: new Map<string, number>(),
-            totals: new Map<string, number>(),
+            costs: new Map<string, number>(),
         };
 
         for (const item of extractedData) {
-            const { amount: quantityAmount } = parseCurrencyValue(item.filledQuantity);
+            const { amount: quantityAmount } = parseCurrencyValue(item.filledQuantity, language);
             totalsData.quantity += quantityAmount;
 
-            const { amount: feeAmount, currency: feeCurrency } = parseCurrencyValue(item.fee);
+            const { amount: feeAmount, currency: feeCurrency } = parseCurrencyValue(item.fee, language);
             if (feeCurrency) {
                 totalsData.fees.set(feeCurrency, (totalsData.fees.get(feeCurrency) || 0) + feeAmount);
             }
 
-            const { amount: totalAmount, currency: totalCurrency } = parseCurrencyValue(item.total);
-            if (totalCurrency) {
-                totalsData.totals.set(totalCurrency, (totalsData.totals.get(totalCurrency) || 0) + totalAmount);
+            const { amount: costAmount, currency: costCurrency } = parseCurrencyValue(item.total, language);
+            if (costCurrency) {
+                totalsData.costs.set(costCurrency, (totalsData.costs.get(costCurrency) || 0) + costAmount);
             }
         }
         
-        const highPrecisionOptions = { maximumFractionDigits: 8 };
-        const currencyOptions = { minimumFractionDigits: 2, maximumFractionDigits: 2 };
-
-        const filledQuantity = `${formatNumber(totalsData.quantity, highPrecisionOptions)} / ${formatNumber(totalsData.quantity, highPrecisionOptions)}`;
-        const fee = Array.from(totalsData.fees.entries()).map(([curr, val]) => `${formatNumber(val, highPrecisionOptions)} ${curr}`).join(', ');
-        const total = Array.from(totalsData.totals.entries()).map(([curr, val]) => `${formatNumber(val, currencyOptions)} ${curr}`).join(', ');
-        
-        const mainTotal = totalsData.totals.get('BRL') || 0;
-        const averagePrice = totalsData.quantity > 0 ? formatNumber(mainTotal / totalsData.quantity, highPrecisionOptions) : formatNumber(0, currencyOptions);
+        const mainTotalCost = totalsData.costs.get('BRL') || 0;
+        const averagePrice = totalsData.quantity > 0 ? mainTotalCost / totalsData.quantity : 0;
 
         return {
-            filledQuantity,
-            fee,
-            total,
+            totalQuantity: totalsData.quantity,
             averagePrice,
+            totalFees: Object.fromEntries(totalsData.fees),
+            totalCost: Object.fromEntries(totalsData.costs),
         };
-    }, [extractedData, formatNumber]);
+    }, [extractedData, language]);
 
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         if (isRegistered || !e.target.files) return;
@@ -527,12 +577,20 @@ const ExecutionProcessor: React.FC<{
                                         <tr>
                                             <td className="px-4 py-4 text-slate-300 uppercase">{t('total')}es</td>
                                             <td></td> {/* Tipo */}
-                                            <td className="px-4 py-4 text-slate-300 whitespace-nowrap font-mono">{totals.filledQuantity}</td>
+                                            <td className="px-4 py-4 text-slate-300 whitespace-nowrap font-mono">
+                                                {formatNumber(totals.totalQuantity, { maximumFractionDigits: 8 })}
+                                            </td>
                                             <td></td> {/* Iceberg */}
-                                            <td className="px-4 py-4 text-slate-300 whitespace-nowrap font-mono">{totals.averagePrice}</td>
+                                            <td className="px-4 py-4 text-slate-300 whitespace-nowrap font-mono">
+                                                {formatNumber(totals.averagePrice, { maximumFractionDigits: 8 })}
+                                            </td>
                                             <td></td> {/* Condições */}
-                                            <td className="px-4 py-4 text-slate-300 whitespace-nowrap font-mono">{totals.fee}</td>
-                                            <td className="px-4 py-4 text-slate-300 whitespace-nowrap font-mono">{totals.total}</td>
+                                            <td className="px-4 py-4 text-slate-300 whitespace-nowrap font-mono">
+                                                {Object.entries(totals.totalFees).map(([curr, val]) => `${formatNumber(val, { maximumFractionDigits: 8 })} ${curr}`).join(', ')}
+                                            </td>
+                                            <td className="px-4 py-4 text-slate-300 whitespace-nowrap font-mono">
+                                                {Object.entries(totals.totalCost).map(([curr, val]) => `${formatNumber(val)} ${curr}`).join(', ')}
+                                            </td>
                                             <td></td> {/* Criação */}
                                             <td></td> {/* Atualização */}
                                             {!isRegistered && <td></td>}
@@ -588,10 +646,10 @@ const HistoryView: React.FC<{
                 const searchIn = [
                     order.id,
                     order.totalAmount.toString(),
-                    order.executionTotals?.total,
-                    order.executionTotals?.filledQuantity,
-                    order.executionTotals?.fee,
-                    order.executionTotals?.averagePrice,
+                    order.executionTotals?.totalCost ? Object.values(order.executionTotals.totalCost).join(' ') : '',
+                    order.executionTotals?.totalQuantity.toString(),
+                    order.executionTotals?.totalFees ? Object.values(order.executionTotals.totalFees).join(' ') : '',
+                    order.executionTotals?.averagePrice.toString(),
                 ].filter(Boolean).join(' ').toLowerCase();
 
                 return searchIn.includes(lowerSearchTerm);
@@ -608,14 +666,21 @@ const HistoryView: React.FC<{
         
         const rows = filteredOrders.map(order => {
             const totals = order.executionTotals!;
+            const totalBRL = totals.totalCost['BRL'] || 0;
+            const totalUSDT = totals.totalQuantity || 0;
+            const feeString = Object.entries(totals.totalFees)
+                .map(([curr, val]) => `${val.toFixed(4)} ${curr}`)
+                .join(' | ');
+            const avgPrice = totals.averagePrice || 0;
+
             return [
                 `"${order.id}"`,
                 `"${new Date(order.createdAt).toLocaleString(locale)}"`,
                 `"${order.totalAmount.toFixed(2)}"`,
-                `"${parseCurrencyValue(totals.total).amount.toFixed(2)}"`,
-                `"${parseCurrencyValue(totals.filledQuantity).amount.toFixed(4)}"`,
-                `"${parseCurrencyValue(totals.fee).amount.toFixed(4)}"`,
-                `"${parseCurrencyValue(totals.averagePrice).amount.toFixed(4)}"`,
+                `"${totalBRL.toFixed(2)}"`,
+                `"${totalUSDT.toFixed(4)}"`,
+                `"${feeString}"`,
+                `"${avgPrice.toFixed(4)}"`,
             ].join(',');
         });
 
@@ -704,20 +769,23 @@ const HistoryView: React.FC<{
                                 const locale = language === 'pt' ? 'pt-BR' : language === 'en' ? 'en-US' : 'es-CL';
                                 const formattedAmount = formatCurrency(order.totalAmount);
                                 
-                                const { amount: brlAmount } = parseCurrencyValue(totals.total);
-                                const { amount: usdtAmount } = parseCurrencyValue(totals.filledQuantity);
-                                const { amount: feeAmount } = parseCurrencyValue(totals.fee);
-                                const { amount: avgPriceAmount } = parseCurrencyValue(totals.averagePrice);
+                                const totalBRL = totals.totalCost['BRL'] || 0;
+                                const totalUSDT = totals.totalQuantity || 0;
+                                const totalFees = totals.totalFees;
+                                const avgPrice = totals.averagePrice || 0;
+
 
                                 return (
                                     <tr key={order.id} className="hover:bg-slate-700/50 transition-colors text-sm">
                                         <td className="px-6 py-4 font-mono text-cyan-400 whitespace-nowrap">{order.id}</td>
                                         <td className="px-6 py-4 text-slate-300 whitespace-nowrap">{new Date(order.createdAt).toLocaleDateString(locale)}</td>
                                         <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap text-right">{formattedAmount}</td>
-                                        <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap text-right">{formatNumber(brlAmount)}</td>
-                                        <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap text-right">{formatNumber(usdtAmount, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
-                                        <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap text-right">{formatNumber(feeAmount, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
-                                        <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap text-right">{formatNumber(avgPriceAmount, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
+                                        <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap text-right">{formatNumber(totalBRL)}</td>
+                                        <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap text-right">{formatNumber(totalUSDT, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
+                                        <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap text-right">
+                                            {Object.entries(totalFees).map(([curr, val]) => `${formatNumber(val, { minimumFractionDigits: 4, maximumFractionDigits: 4 })} ${curr}`).join(' ')}
+                                        </td>
+                                        <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap text-right">{formatNumber(avgPrice, { minimumFractionDigits: 4, maximumFractionDigits: 4 })}</td>
                                         <td className="px-6 py-4 text-center">
                                             <span className={`px-2 py-1 text-xs font-bold rounded-full capitalize ${order.status === 'pagado' ? 'bg-green-500/20 text-green-300' : 'bg-yellow-500/20 text-yellow-300'}`}>
                                                 {t(order.status === 'pagado' ? 'statusPaid' : 'statusPending')}
@@ -781,14 +849,14 @@ const App: React.FC = () => {
     const { t, language } = useLanguage();
     const MIN_RANGE = 14000;
     // State for the generator / current view
-    const [inputValue, setInputValue] = useState('');
+    const [rawInputValue, setRawInputValue] = useState(''); // Store raw digits
     const [generatedLinks, setGeneratedLinks] = useState<GeneratedItem[]>([]);
     const [purchaseOrderCode, setPurchaseOrderCode] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [configError, setConfigError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [linksToGenerate, setLinksToGenerate] = useState(0);
-    const [maxPixValue, setMaxPixValue] = useState(14999);
+    const [rawMaxPixValue, setRawMaxPixValue] = useState(String(14999));
     const [showConfig, setShowConfig] = useState(false);
 
     // State for orders management
@@ -807,13 +875,16 @@ const App: React.FC = () => {
                     body: JSON.stringify(orderToUpdate),
                 });
                 if (!response.ok) {
+                    const errData = await response.json();
+                    setError(errData.error || 'Failed to save order update.');
                     console.error('Failed to save order update to the server.');
                 }
             } catch (err) {
+                setError(t('errorOccurred'));
                 console.error("Error sending order update to server:", err);
             }
         }, 1000), // Debounce updates by 1 second
-        []
+        [t]
     );
     
     // Effect to fetch initial data from backend
@@ -841,18 +912,17 @@ const App: React.FC = () => {
             const order = orders.find(o => o.id === viewState.orderId);
             if (order) {
                 setGeneratedLinks(order.links);
-                setInputValue(String(order.totalAmount.toFixed(2)));
+                const numericString = String(Math.round(order.totalAmount * 100));
+                setRawInputValue(numericString);
                 setPurchaseOrderCode(order.id);
             }
         }
     }, [viewState, orders]);
 
 
-    const calculateLinksToGenerate = (inputVal: string, maxVal: number) => {
-        if (inputVal === '' || inputVal.startsWith('0')) {
-            return 0;
-        }
-        const numValue = parseInt(inputVal, 10);
+    const calculateLinksToGenerate = (numericString: string, maxVal: number) => {
+        if (!numericString) return 0;
+        const numValue = parseInt(numericString, 10) / 100;
         if (!isNaN(numValue) && numValue > 0 && maxVal > 0) {
             return Math.ceil(numValue / maxVal);
         }
@@ -861,10 +931,10 @@ const App: React.FC = () => {
     
     useEffect(() => {
         if (viewState.view === 'generator') {
-            const numToGen = calculateLinksToGenerate(inputValue, maxPixValue);
+            const numToGen = calculateLinksToGenerate(rawInputValue, parseInt(rawMaxPixValue, 10));
             setLinksToGenerate(numToGen);
         }
-    }, [inputValue, maxPixValue, viewState.view]);
+    }, [rawInputValue, rawMaxPixValue, viewState.view]);
     
     const dashboardMetrics = useMemo(() => {
         const metrics = {
@@ -887,18 +957,11 @@ const App: React.FC = () => {
             }
 
             if (order.isExecutionRegistered && order.executionTotals) {
-                const { amount: brlAmount } = parseCurrencyValue(order.executionTotals.total);
-                metrics.totalBRL += brlAmount;
+                metrics.totalBRL += order.executionTotals.totalCost['BRL'] || 0;
+                metrics.totalUSDT += order.executionTotals.totalQuantity || 0;
 
-                const { amount: usdtAmount } = parseCurrencyValue(order.executionTotals.filledQuantity);
-                metrics.totalUSDT += usdtAmount;
-
-                const feeParts = order.executionTotals.fee.split(',');
-                for (const part of feeParts) {
-                    const { amount: feeAmount, currency: feeCurrency } = parseCurrencyValue(part.trim());
-                    if(feeCurrency) {
-                        metrics.totalTaxa.set(feeCurrency, (metrics.totalTaxa.get(feeCurrency) || 0) + feeAmount);
-                    }
+                for (const [currency, value] of Object.entries(order.executionTotals.totalFees)) {
+                    metrics.totalTaxa.set(currency, (metrics.totalTaxa.get(currency) || 0) + value);
                 }
             }
         }
@@ -907,10 +970,11 @@ const App: React.FC = () => {
 
 
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const value = e.target.value;
-        setInputValue(value);
-        const numValue = parseInt(value, 10);
-        if (value && (isNaN(numValue) || numValue <= 0)) {
+        const numericString = parseToNumericString(e.target.value);
+        setRawInputValue(numericString);
+        
+        const numValue = parseInt(numericString, 10) / 100;
+        if (numericString && (isNaN(numValue) || numValue <= 0)) {
             setError(t('errorPositiveNumber'));
         } else {
             setError(null);
@@ -918,21 +982,22 @@ const App: React.FC = () => {
     };
 
     const handleMaxPixChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const value = e.target.value;
-        if (value === '') {
-            setMaxPixValue(MIN_RANGE);
+        const numericString = parseToNumericString(e.target.value);
+        
+        if (numericString === '') {
+            setRawMaxPixValue(String(MIN_RANGE));
             setConfigError(t('errorValueNotEmpty', MIN_RANGE + 1));
             return;
         }
-        const numValue = parseInt(value, 10);
+
+        const numValue = parseInt(numericString, 10);
         if (!isNaN(numValue)) {
             if (numValue <= MIN_RANGE) {
                 setConfigError(t('errorValueGreaterThan', MIN_RANGE));
-                setMaxPixValue(numValue);
             } else {
                 setConfigError(null);
-                setMaxPixValue(numValue);
             }
+            setRawMaxPixValue(numericString);
         }
     };
 
@@ -945,7 +1010,8 @@ const App: React.FC = () => {
         setGeneratedLinks([]);
         setIsLoading(true);
 
-        const valorDeEntrada = parseInt(inputValue, 10);
+        const valorDeEntrada = parseInt(rawInputValue, 10) / 100;
+        const maxPix = parseInt(rawMaxPixValue, 10);
 
         if (isNaN(valorDeEntrada) || valorDeEntrada <= 0) {
             setError(t('errorInputPositive'));
@@ -953,7 +1019,7 @@ const App: React.FC = () => {
             return;
         }
         
-        const numeroDeValores = calculateLinksToGenerate(inputValue, maxPixValue);
+        const numeroDeValores = calculateLinksToGenerate(rawInputValue, maxPix);
         if (numeroDeValores <= 0) {
             setError(t('errorCannotGenerateZero'));
             setIsLoading(false);
@@ -968,49 +1034,18 @@ const App: React.FC = () => {
             if (numeroDeValores === 1) {
                 newValues = [valorDeEntrada];
             } else {
-                const baseValue = Math.floor(valorDeEntrada / numeroDeValores);
-                const remainder = valorDeEntrada % numeroDeValores;
-                newValues = Array(numeroDeValores).fill(baseValue);
-                for (let i = 0; i < remainder; i++) {
-                    newValues[i]++;
-                }
-                for (let k = 0; k < numeroDeValores * 2; k++) {
-                    const i = Math.floor(Math.random() * numeroDeValores);
-                    const j = Math.floor(Math.random() * numeroDeValores);
-                    if (i === j) continue;
+                // To work with integers and avoid float precision issues, multiply by 100
+                const totalInCents = Math.round(valorDeEntrada * 100);
+                const baseValueInCents = Math.floor(totalInCents / numeroDeValores);
+                const remainderInCents = totalInCents % numeroDeValores;
 
-                    const maxTransfer = Math.floor(newValues[i] * 0.05);
-                    if (maxTransfer < 1) continue;
-                    const amountToTransfer = Math.floor(Math.random() * maxTransfer) + 1;
-
-                    newValues[i] -= amountToTransfer;
-                    newValues[j] += amountToTransfer;
+                let valuesInCents = Array(numeroDeValores).fill(baseValueInCents);
+                for (let i = 0; i < remainderInCents; i++) {
+                    valuesInCents[i]++;
                 }
-                let isUnique = false;
-                let attempts = 0;
-                while (!isUnique && attempts < 100) {
-                    const seen = new Set();
-                    let hasDuplicate = false;
-                    for(let i=0; i < newValues.length; i++) {
-                        if(seen.has(newValues[i])) {
-                            hasDuplicate = true;
-                            const j = (i + 1) % newValues.length;
-                            newValues[i]++;
-                            newValues[j]--;
-                            break; 
-                        }
-                        seen.add(newValues[i]);
-                    }
-                    if(!hasDuplicate) {
-                        isUnique = true;
-                    }
-                    attempts++;
-                }
-                const finalSum = newValues.reduce((a, b) => a + b, 0);
-                const diff = valorDeEntrada - finalSum;
-                if (diff !== 0) {
-                    newValues[newValues.length - 1] += diff;
-                }
+                
+                // Convert back to float values
+                newValues = valuesInCents.map(cents => cents / 100);
             }
             
             const newItems: GeneratedItem[] = newValues.map((val, index) => ({
@@ -1024,10 +1059,10 @@ const App: React.FC = () => {
             setIsLoading(false);
         }, 200);
 
-    }, [inputValue, maxPixValue, configError, t]);
+    }, [rawInputValue, rawMaxPixValue, configError, t]);
 
     const handleClear = () => {
-        setInputValue('');
+        setRawInputValue('');
         setGeneratedLinks([]);
         setError(null);
         setLinksToGenerate(0);
@@ -1125,7 +1160,8 @@ const App: React.FC = () => {
         if (!orderId) {
             const { newLinks, newTotal } = updateAndRecalculate(generatedLinks);
             setGeneratedLinks(newLinks);
-            setInputValue(String(newTotal.toFixed(2)));
+            const numericString = String(Math.round(newTotal * 100));
+            setRawInputValue(numericString);
             return;
         }
 
@@ -1135,6 +1171,23 @@ const App: React.FC = () => {
         updateOrder(orderId, { links: newLinks, totalAmount: newTotal });
     };
     
+    const handleDeleteOrder = useCallback(async (orderId: string) => {
+        if (!window.confirm(t('confirmDeleteOrder', orderId))) return;
+        try {
+            const response = await fetch(`/api/orders/${orderId}`, { method: 'DELETE' });
+            if (!response.ok && response.status !== 204) {
+                 const errorData = await response.json().catch(() => ({ error: 'An unknown error occurred during deletion.' }));
+                 throw new Error(errorData.error || `Failed to delete order. Status: ${response.status}`);
+            }
+            setOrders(prev => prev.filter(order => order.id !== orderId));
+            return true;
+        } catch (e) {
+            setError(e instanceof Error ? e.message : 'Failed to delete operation.');
+            setTimeout(() => setError(null), 5000);
+            return false;
+        }
+    }, [t]);
+
     const handleDeleteItem = (id: string) => {
         const orderId = viewState.orderId;
         if (!orderId) {
@@ -1143,17 +1196,28 @@ const App: React.FC = () => {
                 handleClear();
             } else {
                 const newTotal = newLinks.reduce((sum, item) => sum + item.value, 0);
-                setInputValue(String(newTotal.toFixed(2)));
+                const numericString = String(Math.round(newTotal * 100));
+                setRawInputValue(numericString);
                 setGeneratedLinks(newLinks);
             }
             return;
         }
+        
         const orderToUpdate = orders.find(o => o.id === orderId);
         if (!orderToUpdate) return;
         
         const updatedLinks = orderToUpdate.links.filter(item => item.id !== id);
-        const newTotal = updatedLinks.reduce((sum, item) => sum + item.value, 0);
-        updateOrder(orderId, { links: updatedLinks, totalAmount: newTotal });
+        
+        if (updatedLinks.length === 0) {
+            handleDeleteOrder(orderId).then(deleted => {
+                if (deleted) {
+                    handleBackToList();
+                }
+            });
+        } else {
+            const newTotal = updatedLinks.reduce((sum, item) => sum + item.value, 0);
+            updateOrder(orderId, { links: updatedLinks, totalAmount: newTotal });
+        }
     };
 
     const handleSaveExtractedData = (orderId: string, data: ExtractedInfo[]) => {
@@ -1226,18 +1290,13 @@ const App: React.FC = () => {
         });
         
         try {
-            // Modern approach using formatToParts for robustness
             const parts = formatter.formatToParts(value);
             const currencyPart = parts.find(p => p.type === 'currency');
-            
-            // If the currency symbol/code is 'CLP', replace it with just '$'
             if (currencyPart && currencyPart.value.includes('CLP')) {
                 currencyPart.value = '$';
             }
-            
             return parts.map(p => p.value).join('');
         } catch (e) {
-            // Fallback for older environments
             const formatted = formatter.format(value);
             return formatted.replace(/CLP\s*/, '$');
         }
@@ -1303,6 +1362,7 @@ const App: React.FC = () => {
                                             onPaidChange={handlePaidChange}
                                             onValueChange={handleValueChange}
                                             onDelete={handleDeleteItem}
+                                            language={language}
                                          />
                                     ))}
                                 </div>
@@ -1329,6 +1389,8 @@ const App: React.FC = () => {
                  );
             case 'generator':
             default:
+                const formattedInputValue = formatCurrencyInput(rawInputValue, language);
+                const formattedMaxPixValue = formatIntegerInput(rawMaxPixValue, language);
                 return (
                     <>
                         <div className="text-center mb-6">
@@ -1342,12 +1404,12 @@ const App: React.FC = () => {
                                 <div className="space-y-2">
                                     <label htmlFor="maxPix" className="block text-sm font-medium text-slate-400">{t('maxPixValue')}</label>
                                     <input
-                                        type="number"
+                                        type="text"
+                                        inputMode="numeric"
                                         id="maxPix"
-                                        value={maxPixValue}
+                                        value={formattedMaxPixValue}
                                         onChange={handleMaxPixChange}
                                         className="w-full bg-slate-700 border border-slate-600 rounded-md p-2 text-white placeholder-slate-500 focus:ring-2 focus:ring-cyan-500 focus:outline-none transition-shadow"
-                                        min={MIN_RANGE + 1}
                                     />
                                     <p className="text-xs text-slate-500">{t('maxPixValueDescription')}</p>
                                     {configError && (
@@ -1363,16 +1425,16 @@ const App: React.FC = () => {
                         <div className="space-y-4">
                             <div className="flex flex-col sm:flex-row gap-4">
                                 <input
-                                    type="number"
-                                    value={inputValue}
+                                    type="text"
+                                    inputMode="decimal"
+                                    value={formattedInputValue}
                                     onChange={handleInputChange}
                                     placeholder={t('totalAmountPlaceholder')}
-                                    className="flex-grow bg-slate-700 border border-slate-600 rounded-md p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-cyan-500 focus:outline-none transition-shadow"
-                                    min="1"
+                                    className="flex-grow bg-slate-700 border border-slate-600 rounded-md p-3 text-white placeholder-slate-500 focus:ring-2 focus:ring-cyan-500 focus:outline-none transition-shadow text-lg"
                                 />
                                 <button
                                     onClick={handleGenerate}
-                                    disabled={isLoading || !inputValue || error !== null || configError !== null}
+                                    disabled={isLoading || !rawInputValue || error !== null || configError !== null}
                                     className="flex items-center justify-center gap-2 bg-cyan-500 hover:bg-cyan-600 disabled:bg-slate-600 disabled:cursor-not-allowed text-slate-900 font-bold py-3 px-6 rounded-md transition-all duration-300 transform hover:scale-105 disabled:scale-100"
                                 >
                                     {isLoading ? (
@@ -1383,7 +1445,7 @@ const App: React.FC = () => {
                                 </button>
                             </div>
 
-                            {linksToGenerate > 0 && inputValue && !purchaseOrderCode && (
+                            {linksToGenerate > 0 && rawInputValue && !purchaseOrderCode && (
                                 <div className="text-center p-3 bg-slate-700/50 rounded-md border border-slate-700">
                                     <p className="text-slate-300">{t('willGenerateLinks')} <strong className="text-cyan-400 font-mono text-lg">{linksToGenerate}</strong> {t('paymentLinks')}</p>
                                 </div>
@@ -1425,6 +1487,7 @@ const App: React.FC = () => {
                                                 onPaidChange={handlePaidChange}
                                                 onValueChange={handleValueChange}
                                                 onDelete={handleDeleteItem}
+                                                language={language}
                                              />
                                         ))}
                                     </div>
@@ -1479,9 +1542,11 @@ const App: React.FC = () => {
                                                     const totals = order.executionTotals;
                                                     const isRegistered = order.isExecutionRegistered;
                                                     
-                                                    const { amount: brlAmount } = isRegistered ? parseCurrencyValue(totals?.total) : { amount: 0 };
-                                                    const { amount: usdtAmount } = isRegistered ? parseCurrencyValue(totals?.filledQuantity) : { amount: 0 };
-                                                    const { amount: feeAmount } = isRegistered ? parseCurrencyValue(totals?.fee) : { amount: 0 };
+                                                    const totalBRL = isRegistered ? formatNumber(totals?.totalCost['BRL'] || 0) : '-';
+                                                    const totalUSDT = isRegistered ? formatNumber(totals?.totalQuantity || 0, { minimumFractionDigits: 4, maximumFractionDigits: 4 }) : '-';
+                                                    const totalTaxa = isRegistered && totals?.totalFees 
+                                                        ? Object.entries(totals.totalFees).map(([curr, val]) => `${formatNumber(val, { minimumFractionDigits: 4, maximumFractionDigits: 4 })} ${curr}`).join(' ') 
+                                                        : '-';
 
                                                     const formattedAmount = formatCurrency(order.totalAmount);
 
@@ -1499,9 +1564,9 @@ const App: React.FC = () => {
                                                             <td onClick={() => setViewState({ view: 'detail', orderId: order.id })} className="px-6 py-4 font-mono text-cyan-400 whitespace-nowrap cursor-pointer">{order.id}</td>
                                                             <td onClick={() => setViewState({ view: 'detail', orderId: order.id })} className="px-6 py-4 text-slate-300 whitespace-nowrap cursor-pointer">{new Date(order.createdAt).toLocaleString(language)}</td>
                                                             <td onClick={() => setViewState({ view: 'detail', orderId: order.id })} className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap cursor-pointer">{formattedAmount}</td>
-                                                            <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap">{isRegistered ? formatNumber(brlAmount) : '-'}</td>
-                                                            <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap">{isRegistered ? formatNumber(usdtAmount, { minimumFractionDigits: 4, maximumFractionDigits: 4 }) : '-'}</td>
-                                                            <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap">{isRegistered ? formatNumber(feeAmount, { minimumFractionDigits: 4, maximumFractionDigits: 4 }) : '-'}</td>
+                                                            <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap">{totalBRL}</td>
+                                                            <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap">{totalUSDT}</td>
+                                                            <td className="px-6 py-4 font-mono text-slate-300 whitespace-nowrap">{totalTaxa}</td>
                                                             <td onClick={() => setViewState({ view: 'detail', orderId: order.id })} className="px-6 py-4 cursor-pointer">
                                                                 <span className={`px-2 py-1 text-xs font-bold rounded-full capitalize ${order.status === 'pagado' ? 'bg-green-500/20 text-green-300' : 'bg-yellow-500/20 text-yellow-300'}`}>
                                                                     {t(order.status === 'pagado' ? 'statusPaid' : 'statusPending')}
@@ -1577,7 +1642,6 @@ const App: React.FC = () => {
                 .overflow-y-auto::-webkit-scrollbar-track { background: transparent; }
                 .overflow-y-auto::-webkit-scrollbar-thumb { background-color: #475569; border-radius: 20px; border: 3px solid #1e293b; }
                 .overflow-y-auto::-webkit-scrollbar-thumb:hover { background-color: #64748b; }
-                main { max-width: 80rem; }
             `}</style>
         </div>
     );
