@@ -1,7 +1,6 @@
-
-
-// FIX: Changed express import to `require` syntax for better CommonJS compatibility and to resolve type conflicts.
-import express = require('express');
+// FIX: Changed express import to use the default export to avoid type conflicts with global Request/Response.
+// Using express.Request and express.Response for type annotations.
+import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -81,7 +80,7 @@ app.use(express.json({ limit: '10mb' }));
 // --- API Routes ---
 
 // GET all orders
-// FIX: Use explicit express.Request and express.Response types to avoid type conflicts.
+// FIX: Use explicit Request and Response types from express to avoid type conflicts.
 app.get('/api/orders', async (req: express.Request, res: express.Response) => {
     try {
         const result = await pool.query('SELECT * FROM orders ORDER BY "createdAt" DESC');
@@ -93,7 +92,7 @@ app.get('/api/orders', async (req: express.Request, res: express.Response) => {
 });
 
 // POST a new order
-// FIX: Use explicit express.Request and express.Response types to avoid type conflicts.
+// FIX: Use explicit Request and Response types from express to avoid type conflicts.
 app.post('/api/orders', async (req: express.Request, res: express.Response) => {
     const { id, totalAmount, status, createdAt, links } = req.body;
     if (!id || totalAmount === undefined || !status || !createdAt || !links) {
@@ -115,7 +114,7 @@ app.post('/api/orders', async (req: express.Request, res: express.Response) => {
 });
 
 // PUT (update) an existing order
-// FIX: Use explicit express.Request and express.Response types to avoid type conflicts.
+// FIX: Use explicit Request and Response types from express to avoid type conflicts.
 app.put('/api/orders/:id', async (req: express.Request, res: express.Response) => {
     const { id } = req.params;
     const { totalAmount, status, links, extractedData, executionTotals, isExecutionRegistered } = req.body;
@@ -149,7 +148,23 @@ app.put('/api/orders/:id', async (req: express.Request, res: express.Response) =
     }
 });
 
-// FIX: Use explicit express.Request and express.Response types to avoid type conflicts.
+// DELETE an order
+// FIX: Use explicit Request and Response types from express to avoid type conflicts.
+app.delete('/api/orders/:id', async (req: express.Request, res: express.Response) => {
+    const { id } = req.params;
+    try {
+        const result = await pool.query('DELETE FROM orders WHERE id = $1', [id]);
+        if (result.rowCount === 0) {
+            return res.status(404).json({ error: 'Order not found.' });
+        }
+        res.status(204).send(); // Success, no content to return
+    } catch (error) {
+        console.error(`Error deleting order ${id}:`, error);
+        res.status(500).json({ error: 'Failed to delete order from database.' });
+    }
+});
+
+// FIX: Use explicit Request and Response types from express to avoid type conflicts.
 app.post('/api/extract-data', async (req: express.Request, res: express.Response) => {
     const { base64Image, mimeType, prompt } = req.body;
 
@@ -219,7 +234,7 @@ if (process.env.NODE_ENV === 'production') {
     const __dirname = path.dirname(__filename);
     const frontendDistPath = path.join(__dirname, '..', '..', 'dist');
     app.use(express.static(frontendDistPath));
-    // FIX: Use explicit express.Request and express.Response types to avoid type conflicts.
+    // FIX: Use explicit Request and Response types from express to avoid type conflicts.
     app.get('*', (req: express.Request, res: express.Response) => {
         res.sendFile(path.join(frontendDistPath, 'index.html'));
     });

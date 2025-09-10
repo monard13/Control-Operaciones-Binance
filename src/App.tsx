@@ -789,7 +789,6 @@ const App: React.FC = () => {
                 });
                 if (!response.ok) {
                     console.error('Failed to save order update to the server.');
-                    // Here you might want to show an error to the user
                 }
             } catch (err) {
                 console.error("Error sending order update to server:", err);
@@ -815,7 +814,7 @@ const App: React.FC = () => {
         };
 
         fetchOrders();
-    }, [t]); // Add 't' dependency for error message translation
+    }, [t]);
 
     // Sync UI with selected order data for detail view
     useEffect(() => {
@@ -947,29 +946,24 @@ const App: React.FC = () => {
             if (numeroDeValores === 1) {
                 newValues = [valorDeEntrada];
             } else {
-                // 1. Initial even distribution
                 const baseValue = Math.floor(valorDeEntrada / numeroDeValores);
                 const remainder = valorDeEntrada % numeroDeValores;
                 newValues = Array(numeroDeValores).fill(baseValue);
                 for (let i = 0; i < remainder; i++) {
                     newValues[i]++;
                 }
-
-                // 2. Introduce randomness while preserving the sum
                 for (let k = 0; k < numeroDeValores * 2; k++) {
                     const i = Math.floor(Math.random() * numeroDeValores);
                     const j = Math.floor(Math.random() * numeroDeValores);
                     if (i === j) continue;
 
-                    const maxTransfer = Math.floor(newValues[i] * 0.05); // up to 5%
+                    const maxTransfer = Math.floor(newValues[i] * 0.05);
                     if (maxTransfer < 1) continue;
                     const amountToTransfer = Math.floor(Math.random() * maxTransfer) + 1;
 
                     newValues[i] -= amountToTransfer;
                     newValues[j] += amountToTransfer;
                 }
-
-                // 3. Ensure uniqueness as a failsafe
                 let isUnique = false;
                 let attempts = 0;
                 while (!isUnique && attempts < 100) {
@@ -990,8 +984,6 @@ const App: React.FC = () => {
                     }
                     attempts++;
                 }
-                
-                // 4. Final sum correction
                 const finalSum = newValues.reduce((a, b) => a + b, 0);
                 const diff = valorDeEntrada - finalSum;
                 if (diff !== 0) {
@@ -1042,7 +1034,7 @@ const App: React.FC = () => {
                 throw new Error(err.error || 'Failed to save order');
             }
             const savedOrder = await response.json();
-            setOrders(prevOrders => [savedOrder, ...prevOrders]); // Prepend new order to list
+            setOrders(prevOrders => [savedOrder, ...prevOrders]);
             handleClear();
         } catch(e) {
             setError(e instanceof Error ? e.message : 'Failed to register operation.');
@@ -1147,6 +1139,29 @@ const App: React.FC = () => {
 
     const handleRegisterExecution = (orderId: string, totals: OrderTotals) => {
         updateOrder(orderId, { executionTotals: totals, isExecutionRegistered: true });
+    };
+
+    const handleDeleteOrder = async (orderIdToDelete: string) => {
+        if (!window.confirm(t('confirmDeleteOrder', orderIdToDelete))) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/orders/${orderIdToDelete}`, {
+                method: 'DELETE',
+            });
+
+            if (!response.ok) {
+                 const errorData = await response.json().catch(() => ({ error: 'An unknown error occurred during deletion.' }));
+                 throw new Error(errorData.error || `Failed to delete order. Status: ${response.status}`);
+            }
+            
+            setOrders(prevOrders => prevOrders.filter(order => order.id !== orderIdToDelete));
+
+        } catch(e) {
+            setError(e instanceof Error ? e.message : 'Failed to delete operation.');
+            setTimeout(() => setError(null), 5000);
+        }
     };
 
     const currentOrder = viewState.orderId ? orders.find(o => o.id === viewState.orderId) : null;
@@ -1348,6 +1363,7 @@ const App: React.FC = () => {
                                                     <th scope="col" className="px-6 py-3">{t('feeExec')}</th>
                                                     <th scope="col" className="px-6 py-3">{t('status')}</th>
                                                     <th scope="col" className="px-6 py-3">{t('action')}</th>
+                                                    <th scope="col" className="relative px-6 py-3"><span className="sr-only">{t('deleteOrder')}</span></th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-slate-700">
@@ -1393,6 +1409,15 @@ const App: React.FC = () => {
                                                                         </button>
                                                                     )
                                                             )}
+                                                            </td>
+                                                            <td className="px-6 py-4 text-right">
+                                                                <button
+                                                                    onClick={() => handleDeleteOrder(order.id)}
+                                                                    className="text-slate-500 hover:text-red-400 transition-colors p-1"
+                                                                    aria-label={`${t('deleteOrder')} ${order.id}`}
+                                                                >
+                                                                    <TrashIcon className="w-5 h-5" />
+                                                                </button>
                                                             </td>
                                                         </tr>
                                                     );

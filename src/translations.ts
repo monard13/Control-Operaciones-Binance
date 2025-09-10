@@ -49,6 +49,8 @@ export const translations = {
     feeExec: 'Fee (Exec.)',
     process: 'Process',
     processed: 'Processed',
+    deleteOrder: 'Delete Order',
+    confirmDeleteOrder: 'Are you sure you want to permanently delete order {0}? This action cannot be undone.',
 
     // Detail View
     orderDetailTitle: 'Order Detail',
@@ -156,6 +158,8 @@ export const translations = {
     feeExec: 'Taxa (Ejec.)',
     process: 'Procesar',
     processed: 'Procesado',
+    deleteOrder: 'Eliminar Orden',
+    confirmDeleteOrder: '¿Estás seguro de que quieres eliminar permanentemente la orden {0}? Esta acción no se puede deshacer.',
 
     // Detail View
     orderDetailTitle: 'Detalle de la Orden',
@@ -263,6 +267,8 @@ export const translations = {
     feeExec: 'Taxa (Exec.)',
     process: 'Processar',
     processed: 'Processado',
+    deleteOrder: 'Excluir Pedido',
+    confirmDeleteOrder: 'Tem certeza de que deseja excluir permanentemente o pedido {0}? Esta ação não pode ser desfeita.',
 
     // Detail View
     orderDetailTitle: 'Detalhe do Pedido',
