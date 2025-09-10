@@ -124,7 +124,8 @@ const LinkItem: React.FC<{
             <input
                 type="number"
                 value={item.value}
-                onChange={(e) => onValueChange(item.id, parseInt(e.target.value, 10) || 0)}
+                step="0.01"
+                onChange={(e) => onValueChange(item.id, parseFloat(e.target.value) || 0)}
                 className="font-mono text-lg text-cyan-400 bg-slate-800 border border-slate-600 rounded-md py-2 px-3 w-full mb-2 focus:ring-2 focus:ring-cyan-500 focus:outline-none transition-shadow"
             />
             
@@ -218,7 +219,7 @@ const ExecutionProcessor: React.FC<{
             }
         }
         
-        const formatNumber = (num: number) => new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 8 }).format(num);
+        const formatNumber = (num: number) => new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(num);
 
         const filledQuantity = `${formatNumber(totalsData.quantity)} / ${formatNumber(totalsData.quantity)}`;
         const fee = Array.from(totalsData.fees.entries()).map(([curr, val]) => `${formatNumber(val)} ${curr}`).join(', ');
@@ -596,11 +597,11 @@ const HistoryView: React.FC<{ orders: Order[], language: Language }> = ({ orders
             return [
                 `"${order.id}"`,
                 `"${new Date(order.createdAt).toLocaleString(locale)}"`,
-                `"${order.totalAmount}"`,
-                `"${parseNumericValue(totals.total)}"`,
-                `"${parseNumericValue(totals.filledQuantity)}"`,
-                `"${parseNumericValue(totals.fee)}"`,
-                `"${parseNumericValue(totals.averagePrice)}"`,
+                `"${order.totalAmount.toFixed(2)}"`,
+                `"${parseCurrencyValue(totals.total).amount.toFixed(2)}"`,
+                `"${parseCurrencyValue(totals.filledQuantity).amount.toFixed(2)}"`,
+                `"${parseCurrencyValue(totals.fee).amount.toFixed(2)}"`,
+                `"${parseCurrencyValue(totals.averagePrice).amount.toFixed(2)}"`,
             ].join(',');
         });
 
@@ -690,6 +691,8 @@ const HistoryView: React.FC<{ orders: Order[], language: Language }> = ({ orders
                                 const formattedAmount = new Intl.NumberFormat(locale, {
                                     style: 'currency',
                                     currency: 'CLP',
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
                                 }).format(order.totalAmount);
                                 
                                 return (
@@ -824,7 +827,7 @@ const App: React.FC = () => {
             const order = orders.find(o => o.id === viewState.orderId);
             if (order) {
                 setGeneratedLinks(order.links);
-                setInputValue(String(order.totalAmount));
+                setInputValue(String(order.totalAmount.toFixed(2)));
                 setPurchaseOrderCode(order.id);
             }
         }
@@ -860,10 +863,13 @@ const App: React.FC = () => {
         };
 
         for (const order of orders) {
+            const amount = Number(order.totalAmount);
+            if (isNaN(amount)) continue;
+
             if (order.status === 'pendiente') {
-                metrics.montoTotalPendiente += order.totalAmount;
+                metrics.montoTotalPendiente += amount;
             } else if (order.status === 'pagado') {
-                metrics.montoTotalPagado += order.totalAmount;
+                metrics.montoTotalPagado += amount;
             }
 
             if (order.isExecutionRegistered && order.executionTotals) {
@@ -1105,7 +1111,7 @@ const App: React.FC = () => {
         if (!orderId) {
             const { newLinks, newTotal } = updateAndRecalculate(generatedLinks);
             setGeneratedLinks(newLinks);
-            setInputValue(String(newTotal));
+            setInputValue(String(newTotal.toFixed(2)));
             return;
         }
 
@@ -1123,7 +1129,7 @@ const App: React.FC = () => {
                 handleClear();
             } else {
                 const newTotal = newLinks.reduce((sum, item) => sum + item.value, 0);
-                setInputValue(String(newTotal));
+                setInputValue(String(newTotal.toFixed(2)));
                 setGeneratedLinks(newLinks);
             }
             return;
@@ -1200,14 +1206,16 @@ const App: React.FC = () => {
         return new Intl.NumberFormat(locale, {
             style: 'currency',
             currency: 'CLP',
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2,
             ...options
         }).format(value);
     };
 
     const formatTaxa = (taxaMap: Map<string, number>): string => {
-        if (taxaMap.size === 0) return '0';
+        if (taxaMap.size === 0) return '0.00';
         return Array.from(taxaMap.entries())
-            .map(([currency, value]) => `${value.toFixed(4)} ${currency}`)
+            .map(([currency, value]) => `${value.toFixed(2)} ${currency}`)
             .join(', ');
     };
 
@@ -1272,7 +1280,7 @@ const App: React.FC = () => {
                             <DashboardCard title={t('totalPendingAmount')} value={formatCurrency(dashboardMetrics.montoTotalPendiente)} icon={<ClockIcon className="w-7 h-7"/>} colorClass="bg-yellow-500/30 text-yellow-300" />
                             <DashboardCard title={t('totalPaidAmount')} value={formatCurrency(dashboardMetrics.montoTotalPagado)} icon={<CheckCircleIcon className="w-7 h-7"/>} colorClass="bg-green-500/30 text-green-300" />
                             <DashboardCard title={t('totalBRLExecuted')} value={dashboardMetrics.totalBRL.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} icon={<CircleStackIcon className="w-7 h-7"/>} colorClass="bg-indigo-500/30 text-indigo-300" />
-                            <DashboardCard title={t('totalUSDTExecuted')} value={dashboardMetrics.totalUSDT.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })} icon={<BanknotesIcon className="w-7 h-7"/>} colorClass="bg-teal-500/30 text-teal-300" />
+                            <DashboardCard title={t('totalUSDTExecuted')} value={dashboardMetrics.totalUSDT.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} icon={<BanknotesIcon className="w-7 h-7"/>} colorClass="bg-teal-500/30 text-teal-300" />
                             <DashboardCard title={t('totalFeesPaid')} value={formatTaxa(dashboardMetrics.totalTaxa)} icon={<ReceiptPercentIcon className="w-7 h-7"/>} colorClass="bg-rose-500/30 text-rose-300" />
                         </div>
                     </div>
@@ -1433,11 +1441,7 @@ const App: React.FC = () => {
                                                     const totalUSDT = isRegistered ? parseNumericValue(totals?.filledQuantity) : '-';
                                                     const totalTaxa = isRegistered ? parseNumericValue(totals?.fee) : '-';
                                                     
-                                                    const locale = language === 'pt' ? 'pt-BR' : language === 'en' ? 'en-US' : 'es-CL';
-                                                    const formattedAmount = new Intl.NumberFormat(locale, {
-                                                        style: 'currency',
-                                                        currency: 'CLP',
-                                                    }).format(order.totalAmount);
+                                                    const formattedAmount = formatCurrency(order.totalAmount);
 
 
                                                     return (
