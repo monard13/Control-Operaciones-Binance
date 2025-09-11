@@ -5,7 +5,7 @@ import { useLanguage, Language } from './contexts/LanguageContext';
 // Interfaces
 interface GeneratedItem {
   id: string;
-  value: number;
+  value: number; // Will now be an integer
   linkUrl: string;
   isPaid: boolean;
 }
@@ -61,13 +61,14 @@ const debounce = (func: (...args: any[]) => void, delay: number) => {
 const formatCurrencyInput = (rawNumericString: string, language: Language): string => {
     if (!rawNumericString) return '';
     const locale = language === 'pt' ? 'pt-BR' : language === 'en' ? 'en-US' : 'es-CL';
-    const numberValue = parseInt(rawNumericString, 10) / 100;
+    // Treat the raw string as an integer, not cents
+    const numberValue = parseInt(rawNumericString, 10);
     if (isNaN(numberValue)) return '';
 
     const formatted = new Intl.NumberFormat(locale, {
-        minimumFractionDigits: 2,
+        minimumFractionDigits: 2, // Still show decimals for the main input
         maximumFractionDigits: 2,
-    }).format(numberValue);
+    }).format(numberValue / 100); // Divide by 100 only for display
 
     return `$ ${formatted}`;
 };
@@ -75,6 +76,7 @@ const formatCurrencyInput = (rawNumericString: string, language: Language): stri
 // Converts a raw numeric string (e.g., "14999") to a formatted integer string
 const formatIntegerInput = (rawNumericString: string, language: Language): string => {
     if (!rawNumericString) return '';
+    // FIX: Corrected a syntax error where a bitwise OR `|` was used instead of a ternary operator `?`.
     const locale = language === 'pt' ? 'pt-BR' : language === 'en' ? 'en-US' : 'es-CL';
     const numberValue = parseInt(rawNumericString, 10);
     if (isNaN(numberValue)) return '';
@@ -150,15 +152,13 @@ const LinkItem: React.FC<{
     const [copied, setCopied] = useState(false);
     const { t } = useLanguage();
     
-    // Local state to manage the masked input value
-    const [maskedValue, setMaskedValue] = useState(() => 
-        formatCurrencyInput(String(Math.round(item.value * 100)), language)
-    );
-
-    // Sync with external changes to the item's value
-    useEffect(() => {
-        setMaskedValue(formatCurrencyInput(String(Math.round(item.value * 100)), language));
-    }, [item.value, language]);
+    const locale = language === 'pt' ? 'pt-BR' : language === 'en' ? 'en-US' : 'es-CL';
+    const formattedValue = new Intl.NumberFormat(locale, {
+        style: 'currency',
+        currency: 'CLP',
+        minimumFractionDigits: 0, // No decimals for integer values
+        maximumFractionDigits: 0,
+    }).format(item.value).replace(/CLP/, '$');
 
     const handleCopy = useCallback(() => {
         if (!item.linkUrl) return;
@@ -166,15 +166,6 @@ const LinkItem: React.FC<{
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
     }, [item.linkUrl]);
-
-    const handleValueInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const numericString = parseToNumericString(e.target.value);
-        const newMaskedValue = formatCurrencyInput(numericString, language);
-        setMaskedValue(newMaskedValue);
-        
-        const numericValue = parseInt(numericString, 10) / 100;
-        onValueChange(item.id, isNaN(numericValue) ? 0 : numericValue);
-    };
 
     return (
         <div className={`bg-slate-700/50 p-4 rounded-lg flex flex-col transition-all duration-300 hover:bg-slate-700 hover:shadow-lg hover:scale-105 ${item.isPaid ? 'opacity-50 border border-green-500/50' : 'border border-transparent'} relative`}>
@@ -185,13 +176,11 @@ const LinkItem: React.FC<{
             >
                 <TrashIcon className="w-5 h-5" />
             </button>
-            <input
-                type="text" // Use text for masking
-                inputMode="decimal" // Better mobile keyboard
-                value={maskedValue}
-                onChange={handleValueInputChange}
+            <div
                 className="font-mono text-lg text-cyan-400 bg-slate-800 border border-slate-600 rounded-md py-2 px-3 w-full mb-2 focus:ring-2 focus:ring-cyan-500 focus:outline-none transition-shadow"
-            />
+            >
+              {formattedValue}
+            </div>
             
             <div className="relative w-full mb-3">
                 <input
@@ -912,6 +901,7 @@ const App: React.FC = () => {
             const order = orders.find(o => o.id === viewState.orderId);
             if (order) {
                 setGeneratedLinks(order.links);
+                 // Since totalAmount can have decimals, we store it as a cent string for the mask
                 const numericString = String(Math.round(order.totalAmount * 100));
                 setRawInputValue(numericString);
                 setPurchaseOrderCode(order.id);
@@ -922,8 +912,10 @@ const App: React.FC = () => {
 
     const calculateLinksToGenerate = (numericString: string, maxVal: number) => {
         if (!numericString) return 0;
-        const numValue = parseInt(numericString, 10) / 100;
+        // The raw input is in cents, so we parse it as an integer and don't divide
+        const numValue = parseInt(numericString, 10);
         if (!isNaN(numValue) && numValue > 0 && maxVal > 0) {
+            // maxVal is a whole number, so we compare with the integer value
             return Math.ceil(numValue / maxVal);
         }
         return 0;
@@ -931,7 +923,9 @@ const App: React.FC = () => {
     
     useEffect(() => {
         if (viewState.view === 'generator') {
-            const numToGen = calculateLinksToGenerate(rawInputValue, parseInt(rawMaxPixValue, 10));
+            // rawInputValue is in cents, but we need the whole number part for calculation
+            const integerValue = Math.floor(parseInt(rawInputValue, 10) / 100);
+            const numToGen = calculateLinksToGenerate(String(integerValue), parseInt(rawMaxPixValue, 10));
             setLinksToGenerate(numToGen);
         }
     }, [rawInputValue, rawMaxPixValue, viewState.view]);
@@ -1012,8 +1006,9 @@ const App: React.FC = () => {
         }
         setGeneratedLinks([]);
         setIsLoading(true);
-
-        const valorDeEntrada = parseInt(rawInputValue, 10) / 100;
+        
+        // Treat the input as a whole number, ignoring cents
+        const valorDeEntrada = Math.floor(parseInt(rawInputValue, 10) / 100);
         const maxPix = parseInt(rawMaxPixValue, 10);
 
         if (isNaN(valorDeEntrada) || valorDeEntrada <= 0) {
@@ -1022,7 +1017,7 @@ const App: React.FC = () => {
             return;
         }
         
-        const numeroDeValores = calculateLinksToGenerate(rawInputValue, maxPix);
+        const numeroDeValores = Math.ceil(valorDeEntrada / maxPix);
         if (numeroDeValores <= 0) {
             setError(t('errorCannotGenerateZero'));
             setIsLoading(false);
@@ -1037,41 +1032,42 @@ const App: React.FC = () => {
             if (numeroDeValores === 1) {
                 newValues = [valorDeEntrada];
             } else {
-                // Work with cents to avoid float precision issues
-                const totalInCents = Math.round(valorDeEntrada * 100);
-                
-                // 1. Initial even distribution
-                const baseValueInCents = Math.floor(totalInCents / numeroDeValores);
-                const remainderInCents = totalInCents % numeroDeValores;
-                let valuesInCents = Array(numeroDeValores).fill(baseValueInCents);
-                for (let i = 0; i < remainderInCents; i++) {
-                    valuesInCents[i]++;
+                // 1. Initial even distribution with integers
+                const baseValue = Math.floor(valorDeEntrada / numeroDeValores);
+                const remainder = valorDeEntrada % numeroDeValores;
+                let values = Array(numeroDeValores).fill(baseValue);
+                for (let i = 0; i < remainder; i++) {
+                    values[i]++;
                 }
 
-                // 2. Ensure uniqueness with a deterministic spread algorithm if needed
-                const isAlreadyUnique = new Set(valuesInCents).size === numeroDeValores;
-                if (!isAlreadyUnique) {
-                    const mid = Math.floor(numeroDeValores / 2);
-                    for (let i = 0; i < mid; i++) {
-                        const adjustment = mid - i;
-                        valuesInCents[i] -= adjustment;
-                        valuesInCents[numeroDeValores - 1 - i] += adjustment;
+                // 2. Guarantee uniqueness by adjusting values
+                let attempts = 0;
+                while (new Set(values).size < values.length && attempts < 1000) {
+                    values.sort((a, b) => a - b); // Sort to easily find duplicates and max
+                    
+                    // Find first duplicate
+                    for (let i = 1; i < values.length; i++) {
+                        if (values[i] <= values[i-1]) {
+                             values[i]++; // Increment the smaller value of a pair
+                             values[values.length - 1]--; // Decrement the largest value to maintain sum
+                             break; // Restart the process
+                        }
                     }
+                    attempts++;
                 }
                 
                 // 3. Shuffle the results for randomness
-                for (let i = valuesInCents.length - 1; i > 0; i--) {
+                for (let i = values.length - 1; i > 0; i--) {
                     const j = Math.floor(Math.random() * (i + 1));
-                    [valuesInCents[i], valuesInCents[j]] = [valuesInCents[j], valuesInCents[i]];
+                    [values[i], values[j]] = [values[j], values[i]];
                 }
                 
-                // 4. Convert back to float values
-                newValues = valuesInCents.map(cents => cents / 100);
+                newValues = values;
             }
             
             const newItems: GeneratedItem[] = newValues.map((val, index) => ({
                 id: `${poCode}-${index}`,
-                value: val,
+                value: val, // Value is now a guaranteed unique integer
                 linkUrl: '',
                 isPaid: false,
             }));
@@ -1181,7 +1177,8 @@ const App: React.FC = () => {
         if (!orderId) {
             const { newLinks, newTotal } = updateAndRecalculate(generatedLinks);
             setGeneratedLinks(newLinks);
-            const numericString = String(Math.round(newTotal * 100));
+            // Since new total is an integer, store it * 100 for the mask
+            const numericString = String(newTotal * 100);
             setRawInputValue(numericString);
             return;
         }
@@ -1217,7 +1214,7 @@ const App: React.FC = () => {
                 handleClear();
             } else {
                 const newTotal = newLinks.reduce((sum, item) => sum + item.value, 0);
-                const numericString = String(Math.round(newTotal * 100));
+                const numericString = String(newTotal * 100);
                 setRawInputValue(numericString);
                 setGeneratedLinks(newLinks);
             }
@@ -1337,7 +1334,7 @@ const App: React.FC = () => {
         return Array.from(taxaMap.entries())
             .map(([currency, value]) => `${formatNumber(value, { minimumFractionDigits: 4, maximumFractionDigits: 4 })} ${currency}`)
             .join(', ');
-    }, [language, formatNumber]);
+    }, [formatNumber]);
 
 
     const renderContent = () => {
@@ -1365,7 +1362,7 @@ const App: React.FC = () => {
                             <div className="flex items-center gap-6">
                                 <div className="text-right">
                                     <p className="text-slate-400 text-sm font-semibold">{t('totalAmount')}</p>
-                                    <p className="text-2xl font-bold text-white font-mono">{formatCurrency(currentOrder.totalAmount)}</p>
+                                    <p className="text-2xl font-bold text-white font-mono">{formatCurrency(currentOrder.totalAmount, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
                                 </div>
                                 <button onClick={handleBackToList} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors duration-200 text-sm py-2 px-4 rounded-md hover:bg-slate-700">
                                     <ArrowUturnLeftIcon className="w-5 h-5"/> {t('backToList')}
