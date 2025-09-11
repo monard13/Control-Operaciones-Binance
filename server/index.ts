@@ -1,5 +1,6 @@
 
-import express from 'express';
+// FIX: Changed import to use default Request and Response types from express to fix type errors.
+import express, { Request, Response } from 'express';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -44,7 +45,7 @@ async function initializeDatabase() {
 }
 
 initializeDatabase().catch(err => {
-    console.error("Failed to initialize database on startup:", err);
+    console.error("FATAL: Failed to initialize database on startup:", err);
     process.exit(1);
 });
 
@@ -79,7 +80,7 @@ app.use(express.json({ limit: '10mb' }));
 // --- API Routes ---
 
 // GET all orders
-app.get('/api/orders', async (req: express.Request, res: express.Response) => {
+app.get('/api/orders', async (req: Request, res: Response) => {
     try {
         const result = await pool.query('SELECT * FROM orders ORDER BY "createdAt" DESC');
         res.json(result.rows);
@@ -90,7 +91,7 @@ app.get('/api/orders', async (req: express.Request, res: express.Response) => {
 });
 
 // POST a new order
-app.post('/api/orders', async (req: express.Request, res: express.Response) => {
+app.post('/api/orders', async (req: Request, res: Response) => {
     const { id, totalAmount, status, createdAt, links } = req.body;
     if (!id || totalAmount === undefined || !status || !createdAt || !links) {
         return res.status(400).json({ error: 'Missing required fields for order.' });
@@ -111,7 +112,7 @@ app.post('/api/orders', async (req: express.Request, res: express.Response) => {
 });
 
 // PUT (update) an existing order
-app.put('/api/orders/:id', async (req: express.Request, res: express.Response) => {
+app.put('/api/orders/:id', async (req: Request, res: Response) => {
     const { id } = req.params;
     const { totalAmount, status, links, extractedData, executionTotals, isExecutionRegistered } = req.body;
     if (totalAmount === undefined || !status || !links) {
@@ -145,7 +146,7 @@ app.put('/api/orders/:id', async (req: express.Request, res: express.Response) =
 });
 
 // DELETE an order
-app.delete('/api/orders/:id', async (req: express.Request, res: express.Response) => {
+app.delete('/api/orders/:id', async (req: Request, res: Response) => {
     const { id } = req.params;
     try {
         const result = await pool.query('DELETE FROM orders WHERE id = $1', [id]);
@@ -160,7 +161,7 @@ app.delete('/api/orders/:id', async (req: express.Request, res: express.Response
 });
 
 // POST for bulk deletion
-app.post('/api/orders/bulk-delete', async (req: express.Request, res: express.Response) => {
+app.post('/api/orders/bulk-delete', async (req: Request, res: Response) => {
     const { ids } = req.body;
     if (!Array.isArray(ids) || ids.length === 0) {
         return res.status(400).json({ error: 'An array of order IDs is required.' });
@@ -176,7 +177,7 @@ app.post('/api/orders/bulk-delete', async (req: express.Request, res: express.Re
     }
 });
 
-app.post('/api/extract-data', async (req: express.Request, res: express.Response) => {
+app.post('/api/extract-data', async (req: Request, res: Response) => {
     const { base64Image, mimeType, prompt } = req.body;
 
     if (!base64Image || !mimeType || !prompt) {
@@ -241,15 +242,21 @@ app.post('/api/extract-data', async (req: express.Request, res: express.Response
 
 // Serve frontend
 if (process.env.NODE_ENV === 'production') {
+    console.log("Production mode detected. Setting up static file serving.");
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = path.dirname(__filename);
-    const frontendDistPath = path.join(__dirname, '..', '..', 'dist');
+    const frontendDistPath = path.resolve(__dirname, '..', '..', 'dist');
+    
+    console.log(`Serving static files from: ${frontendDistPath}`);
+    
     app.use(express.static(frontendDistPath));
-    app.get('*', (req: express.Request, res: express.Response) => {
-        res.sendFile(path.join(frontendDistPath, 'index.html'));
+    
+    app.get('*', (req: Request, res: Response) => {
+        const indexPath = path.join(frontendDistPath, 'index.html');
+        res.sendFile(indexPath);
     });
 }
 
 app.listen(PORT, () => {
-    console.log(`Server is listening on port ${PORT}`);
+    console.log(`Server initialization complete. Listening on port ${PORT}`);
 });
