@@ -1,5 +1,6 @@
 // FIX: Changed to use `express.Request` and `express.Response` to avoid conflict with global types.
-import express from 'express';
+// FIX: Now explicitly importing Request and Response from express for better type resolution.
+import express, { Request, Response } from 'express';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -74,13 +75,14 @@ interface ExtractedInfo {
 
 // Middleware
 app.use(cors());
+// FIX: Use express.json() which returns a RequestHandler. The type error suggests a global type conflict which is fixed by explicitly importing Request and Response.
 app.use(express.json({ limit: '10mb' }));
 
 // --- API Routes ---
 
 // GET all orders
-// FIX: Use express.Request and express.Response for correct typing
-app.get('/api/orders', async (req: express.Request, res: express.Response) => {
+// FIX: Use Request and Response from express for correct typing
+app.get('/api/orders', async (req: Request, res: Response) => {
     try {
         const result = await pool.query('SELECT * FROM orders ORDER BY "createdAt" DESC');
         res.json(result.rows);
@@ -91,8 +93,8 @@ app.get('/api/orders', async (req: express.Request, res: express.Response) => {
 });
 
 // POST a new order
-// FIX: Use express.Request and express.Response for correct typing
-app.post('/api/orders', async (req: express.Request, res: express.Response) => {
+// FIX: Use Request and Response from express for correct typing
+app.post('/api/orders', async (req: Request, res: Response) => {
     const { id, totalAmount, status, createdAt, links } = req.body;
     if (!id || totalAmount === undefined || !status || !createdAt || !links) {
         return res.status(400).json({ error: 'Missing required fields for order.' });
@@ -113,8 +115,8 @@ app.post('/api/orders', async (req: express.Request, res: express.Response) => {
 });
 
 // PUT (update) an existing order
-// FIX: Use express.Request and express.Response for correct typing
-app.put('/api/orders/:id', async (req: express.Request, res: express.Response) => {
+// FIX: Use Request and Response from express for correct typing
+app.put('/api/orders/:id', async (req: Request, res: Response) => {
     const { id } = req.params;
     const { totalAmount, status, links, extractedData, executionTotals, isExecutionRegistered } = req.body;
     if (totalAmount === undefined || !status || !links) {
@@ -148,8 +150,8 @@ app.put('/api/orders/:id', async (req: express.Request, res: express.Response) =
 });
 
 // DELETE an order
-// FIX: Use express.Request and express.Response for correct typing
-app.delete('/api/orders/:id', async (req: express.Request, res: express.Response) => {
+// FIX: Use Request and Response from express for correct typing
+app.delete('/api/orders/:id', async (req: Request, res: Response) => {
     const { id } = req.params;
     try {
         const result = await pool.query('DELETE FROM orders WHERE id = $1', [id]);
@@ -164,8 +166,8 @@ app.delete('/api/orders/:id', async (req: express.Request, res: express.Response
 });
 
 // POST for bulk deletion
-// FIX: Use express.Request and express.Response for correct typing
-app.post('/api/orders/bulk-delete', async (req: express.Request, res: express.Response) => {
+// FIX: Use Request and Response from express for correct typing
+app.post('/api/orders/bulk-delete', async (req: Request, res: Response) => {
     const { ids } = req.body;
     if (!Array.isArray(ids) || ids.length === 0) {
         return res.status(400).json({ error: 'An array of order IDs is required.' });
@@ -181,8 +183,8 @@ app.post('/api/orders/bulk-delete', async (req: express.Request, res: express.Re
     }
 });
 
-// FIX: Use express.Request and express.Response for correct typing
-app.post('/api/extract-data', async (req: express.Request, res: express.Response) => {
+// FIX: Use Request and Response from express for correct typing
+app.post('/api/extract-data', async (req: Request, res: Response) => {
     const { base64Image, mimeType, prompt } = req.body;
 
     if (!base64Image || !mimeType || !prompt) {
@@ -251,8 +253,8 @@ if (process.env.NODE_ENV === 'production') {
     const __dirname = path.dirname(__filename);
     const frontendDistPath = path.join(__dirname, '..', '..', 'dist');
     app.use(express.static(frontendDistPath));
-    // FIX: Use express.Request and express.Response for correct typing
-    app.get('*', (req: express.Request, res: express.Response) => {
+    // FIX: Use Request and Response from express for correct typing
+    app.get('*', (req: Request, res: Response) => {
         res.sendFile(path.join(frontendDistPath, 'index.html'));
     });
 }

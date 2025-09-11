@@ -647,9 +647,9 @@ const HistoryView: React.FC<{
                     order.id,
                     order.totalAmount.toString(),
                     order.executionTotals?.totalCost ? Object.values(order.executionTotals.totalCost).join(' ') : '',
-                    order.executionTotals?.totalQuantity.toString(),
+                    order.executionTotals?.totalQuantity?.toString(),
                     order.executionTotals?.totalFees ? Object.values(order.executionTotals.totalFees).join(' ') : '',
-                    order.executionTotals?.averagePrice.toString(),
+                    order.executionTotals?.averagePrice?.toString(),
                 ].filter(Boolean).join(' ').toLowerCase();
 
                 return searchIn.includes(lowerSearchTerm);
@@ -666,11 +666,11 @@ const HistoryView: React.FC<{
         
         const rows = filteredOrders.map(order => {
             const totals = order.executionTotals!;
-            const totalBRL = totals.totalCost['BRL'] || 0;
+            const totalBRL = totals.totalCost?.['BRL'] || 0;
             const totalUSDT = totals.totalQuantity || 0;
-            const feeString = Object.entries(totals.totalFees)
+            const feeString = totals.totalFees ? Object.entries(totals.totalFees)
                 .map(([curr, val]) => `${val.toFixed(4)} ${curr}`)
-                .join(' | ');
+                .join(' | ') : '0';
             const avgPrice = totals.averagePrice || 0;
 
             return [
@@ -769,9 +769,9 @@ const HistoryView: React.FC<{
                                 const locale = language === 'pt' ? 'pt-BR' : language === 'en' ? 'en-US' : 'es-CL';
                                 const formattedAmount = formatCurrency(order.totalAmount);
                                 
-                                const totalBRL = totals.totalCost['BRL'] || 0;
+                                const totalBRL = totals.totalCost?.['BRL'] || 0;
                                 const totalUSDT = totals.totalQuantity || 0;
-                                const totalFees = totals.totalFees;
+                                const totalFees = totals.totalFees || {};
                                 const avgPrice = totals.averagePrice || 0;
 
 
@@ -957,11 +957,14 @@ const App: React.FC = () => {
             }
 
             if (order.isExecutionRegistered && order.executionTotals) {
-                metrics.totalBRL += order.executionTotals.totalCost['BRL'] || 0;
+                // Safely access nested properties to prevent crashes with old data structures
+                metrics.totalBRL += order.executionTotals.totalCost?.['BRL'] || 0;
                 metrics.totalUSDT += order.executionTotals.totalQuantity || 0;
 
-                for (const [currency, value] of Object.entries(order.executionTotals.totalFees)) {
-                    metrics.totalTaxa.set(currency, (metrics.totalTaxa.get(currency) || 0) + value);
+                if (order.executionTotals.totalFees) {
+                    for (const [currency, value] of Object.entries(order.executionTotals.totalFees)) {
+                        metrics.totalTaxa.set(currency, (metrics.totalTaxa.get(currency) || 0) + value);
+                    }
                 }
             }
         }
@@ -1542,7 +1545,7 @@ const App: React.FC = () => {
                                                     const totals = order.executionTotals;
                                                     const isRegistered = order.isExecutionRegistered;
                                                     
-                                                    const totalBRL = isRegistered ? formatNumber(totals?.totalCost['BRL'] || 0) : '-';
+                                                    const totalBRL = isRegistered ? formatNumber(totals?.totalCost?.['BRL'] || 0) : '-';
                                                     const totalUSDT = isRegistered ? formatNumber(totals?.totalQuantity || 0, { minimumFractionDigits: 4, maximumFractionDigits: 4 }) : '-';
                                                     const totalTaxa = isRegistered && totals?.totalFees 
                                                         ? Object.entries(totals.totalFees).map(([curr, val]) => `${formatNumber(val, { minimumFractionDigits: 4, maximumFractionDigits: 4 })} ${curr}`).join(' ') 
