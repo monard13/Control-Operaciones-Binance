@@ -1048,39 +1048,17 @@ const App: React.FC = () => {
                     valuesInCents[i]++;
                 }
 
-                // 2. Ensure uniqueness by spreading values
-                let attempts = 0;
-                const maxAttempts = numeroDeValores * 10; // Safety break
-                while (new Set(valuesInCents).size < numeroDeValores && attempts < maxAttempts) {
-                    const valueMap = new Map<number, number[]>();
-                    valuesInCents.forEach((val, index) => {
-                        if (!valueMap.has(val)) valueMap.set(val, []);
-                        valueMap.get(val)!.push(index);
-                    });
-
-                    let changed = false;
-                    for (const [val, indices] of valueMap.entries()) {
-                        if (indices.length > 1) {
-                            const min = Math.min(...valuesInCents);
-                            const max = Math.max(...valuesInCents);
-
-                            if (max > min) {
-                                const maxIndex = valuesInCents.indexOf(max);
-                                const minIndex = valuesInCents.indexOf(min);
-                                valuesInCents[maxIndex]--;
-                                valuesInCents[minIndex]++;
-                            } else { // All values are the same
-                                valuesInCents[0]--;
-                                valuesInCents[valuesInCents.length - 1]++;
-                            }
-                            changed = true;
-                            break; 
-                        }
+                // 2. Ensure uniqueness with a deterministic spread algorithm if needed
+                const isAlreadyUnique = new Set(valuesInCents).size === numeroDeValores;
+                if (!isAlreadyUnique) {
+                    const mid = Math.floor(numeroDeValores / 2);
+                    for (let i = 0; i < mid; i++) {
+                        const adjustment = mid - i;
+                        valuesInCents[i] -= adjustment;
+                        valuesInCents[numeroDeValores - 1 - i] += adjustment;
                     }
-                    if (!changed) break; // Break if no changes could be made
-                    attempts++;
                 }
-
+                
                 // 3. Shuffle the results for randomness
                 for (let i = valuesInCents.length - 1; i > 0; i--) {
                     const j = Math.floor(Math.random() * (i + 1));
